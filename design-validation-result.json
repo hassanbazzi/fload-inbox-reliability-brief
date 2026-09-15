@@ -1,0 +1,30 @@
+{
+  "schemaCompiled": true,
+  "proofPassed": true,
+  "database": "isolated PostgreSQL 17",
+  "tableCount": 25,
+  "columnCount": 464,
+  "validatedAt": "2026-09-15T19:40:07Z",
+  "applicationImplemented": false,
+  "migrationTested": false,
+  "sqlAssertions": {
+    "positive": 16,
+    "negative": 44
+  },
+  "concurrency": {
+    "sessions": 2,
+    "rowLockWaitObserved": true,
+    "winnerVersionAdvance": 1,
+    "staleCommandAccepted": false
+  },
+  "schemaSha256": "286759db47908aba8740a3831207849ecdb09bf391ff3ac2f0c5235834d94e07",
+  "schemaParts": {
+    "schema-core.sql": "0ae9329e35fcb4d344755bffc4a3be0961f308c044b35b7192d0316b717a032d",
+    "schema-content.sql": "6b3d00010f8a6537dfe5d1140732a205fc6b3188e2b059916ffb4424a092a48d",
+    "schema-content-additions.sql": "dd83efe950b9881f4c074021fb393ab0802a82f695f9bafb5bbd9b5acb3e43b2",
+    "schema-revision-guards.sql": "3e4720b57e5f7fc22a37c6f27e695b76536a3d9c67bbd82297476c0977840f7c",
+    "schema-command-guards.sql": "dd5f4d41465bc9b510bea267e30404f0f4f107d90a7f4afb5a362039b00ef859",
+    "schema-execution-guards.sql": "b1e796dca826f1649e26ad9b3bfb55137dc8e2d3563ee891710a9991e158a5fc",
+    "schema-domain-bindings.sql": "3f8f7754275b2cc788dabea94a3a11952efbad0fbb7220a650448713aa089fcc"
+  }
+}
