@@ -1,3 +1,5 @@
+-- SUPERSEDED CANDIDATE: the six-table ceiling and combined action_job are withdrawn.
+-- Retained for comparison only. See Fload-Inbox-Normalization-and-Queues-Review.md.
 -- Fload inbox — proposed structural schema, 15 September 2026.
 -- NOT A MIGRATION. Do not run against the application database.
 -- Creates target tables for design review. Existing pending_action/inbox_item_state

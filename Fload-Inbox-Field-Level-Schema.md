@@ -1,3 +1,5 @@
+> **Superseded candidate, 15 September 2026.** The six-table ceiling and combined `action_job` design are withdrawn. This dictionary is retained for comparison, not as the normalized target. [Read the current review and replacement execution fields](https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-Normalization-and-Queues-Review.md).
+
 # Fload inbox — proposed field-level schema
 
 15 September 2026. This is the concrete target-field dictionary, not the deployed database.
