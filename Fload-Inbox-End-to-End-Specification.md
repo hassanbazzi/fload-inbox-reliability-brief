@@ -2,6 +2,8 @@
 
 15 September 2026 · FLO-1355 · Source baseline `63275b2f51ac5b5a151a9a6683c813423e682785`
 
+> **16 September amendment:** [Provider boundary review](Fload-Provider-Boundary-Review.md) refines ownership of content, targets and evidence. The SQL/field catalog below remains the validated baseline, not an implemented or validated multi-schema refactor. Common Actions lifecycle guarantees remain; the final physical schema requires this responsibility split.
+
 ## Scope and decision
 
 Build one durable Actions model for the capabilities that are supported and used today. The inbox is a view over that model. It is not another owner of workflow state. Existing BullMQ queues deliver work; the existing agent runtime owns agent computation and usage. Reports, reviews, experiments and observed store data retain their domain ownership.

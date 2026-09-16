@@ -4,6 +4,8 @@ Generated from the isolated PostgreSQL 17 design proof at 2026-09-15T19:40:07Z.
 
 **25 relations · 464 fields.** This is proposed executable DDL, not the deployed application schema or a production migration.
 
+The [16 September provider boundary amendment](Fload-Provider-Boundary-Review.md) recommends a responsibility/schema split that is not applied to this tested baseline.
+
 All fields below are introspected after all schema guards and domain bindings are applied. JSON is used only to distribute the catalog; no SQL JSON/JSONB or array columns exist.
 
 ## Ticket and content version

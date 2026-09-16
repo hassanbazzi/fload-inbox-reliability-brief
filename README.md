@@ -4,6 +4,8 @@
 
 This is a current-capability architecture investigation and executable database design proof for FLO-1355. It is **not an implemented platform change, production migration or deployment**.
 
+Read the [16 September internal/external boundary amendment](Fload-Provider-Boundary-Review.md) for the recommended integration ownership split; that split has not yet been applied to the validated SQL baseline.
+
 Start with [the end-to-end specification](Fload-Inbox-End-to-End-Specification.md). Inspect [the actual SQL](Fload-Inbox-Current-Schema.sql), [every field and constraint](Fload-Inbox-Current-Fields.md), and the [database-generated catalog](current-schema-catalog.json).
 
 Supporting audits:
