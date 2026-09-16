@@ -2,11 +2,11 @@
 
 16 September 2026 · FLO-1355 · Source baseline `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc`
 
-This review now accompanies the actual paused prototype schema: **31 physical tables, 497 fields and three views across four PostgreSQL schemas**. The exact repository migration chain was applied to an isolated synthetic test database and exported into the [field explorer](Fload-Inbox-Current-Fields.md). Application implementation and migration cutover remain incomplete; no production deployment occurred. Earlier 25-table source audits remain dated supporting evidence, not the current schema authority.
+This review accompanies the **unchanged, paused draft: 31 physical tables, 497 columns and three views across four PostgreSQL schemas**. The [field explorer](Fload-Inbox-Current-Fields.md) records what the prototype contains, not an approved destination schema. Its migration chain has been applied to isolated synthetic databases, but independent review found correctness gaps that require redesign and fresh validation. Implementation remains paused; no production deployment occurred. Earlier 25-table audits are dated supporting evidence. The [review resolution](Fload-Review-Resolution.md) records the full finding-by-finding disposition.
 
 ## Recommendation
 
-Keep one PostgreSQL database and one Actions lifecycle. Put provider-specific content, targets and evidence behind explicit integration modules; use PostgreSQL schemas to make their storage ownership visible. Organize by independently changing API/product contracts: `apple_ads`, `app_store_connect`, `google_play`, and, when a real write capability is implemented, `meta_ads`. A single `apple` namespace would put two different products back together.
+Keep one PostgreSQL database and one Actions lifecycle. Put provider-specific content, targets and evidence behind explicit integration modules, organized by independently changing API/product contracts: Apple Ads, App Store Connect and Google Play. A future Meta write capability would get its own investigated contract. Code ownership is required; separate PostgreSQL namespaces and one-to-one provider tables are optional physical choices to evaluate. The next design pass must justify each split by its constraints, lifecycle, permissions or maintenance benefit, rather than adopt a target table count.
 
 The same organization belongs in code first. Fload already documents provider-neutral bounded contexts and adapter composition in [Core architecture](https://github.com/fload-ai/fload-platform/blob/f0b1af5fc5925d818be7d9b02b42b1fc54556ecc/docs/core-architecture.md). Its [Apple architecture tests](https://github.com/fload-ai/fload-platform/blob/f0b1af5fc5925d818be7d9b02b42b1fc54556ecc/packages/apple/src/architecture.test.ts) already keep product clients independent and exclude Fload infrastructure from those clients. Extend that boundary instead of inventing another execution framework.
 
@@ -39,13 +39,13 @@ The earlier generic Ads relation was effectively **Apple Search Ads content**. T
 | `action_execution_attempt` | Attempt identity, timing, claim fence, common outcome classification | Play edit receipts/expiry, ASC localization/media identifiers, provider-specific observations and finality evidence |
 | Provider resources and credentials | Fload connector authorization, account access and scoped references | Integration-specific remote account/resource bindings; credentials remain with Connectors/secure transport |
 
-A provider-specific prepared request is **not** an untyped payload. It has named columns, closed variants, checks and tenant-safe foreign keys. Provider responses enter strict decoders and are mapped into explicit typed evidence. Unknown provider values remain unsupported/uncertain; they cannot silently become approved or successful.
+The required provider-specific prepared request has named columns, closed variants, complete subtype checks and tenant-safe foreign keys. The prototype does not yet satisfy that standard everywhere: advisory/request variants permit irrelevant field combinations, and some attribution and connector references lack tenant validation. Absence of JSONB is not sufficient evidence of strictness. Provider responses must enter strict decoders and explicit typed evidence; unknown values cannot silently become approved or successful.
 
 Authored content does not automatically belong in Actions either. Reviews owns reply content and reply policy; Listings owns listing content and experiments; Ads owns advertising policy. Actions coordinates approval and execution of their immutable revisions. Domain code must not copy a second approval or lifecycle into its own rows.
 
-## 3. Proposed namespace layout
+## 3. Ownership layout and physical alternatives
 
-This is a responsibility layout, not a request to create every namespace or a new table for every endpoint today:
+This is a responsibility map. The current prototype implements four namespaces; the final physical layout remains undecided. It is not a request to create every namespace or a new table for every endpoint:
 
 ```text
 One PostgreSQL database
@@ -77,13 +77,37 @@ PostgreSQL schemas provide namespaces and privileges within the same database. T
 
 Drizzle supports named PostgreSQL schemas through `pgSchema`. The actual migration must also cover migration discovery, RLS/grants, schema-qualified queries, introspection, backup/restore, seed tooling and test cleanup. Changing a prefix alone does not enforce architectural ownership. [Drizzle schema documentation](https://orm.drizzle.team/docs/schemas)
 
-### Make the physical split deliberate
+### Evaluate the physical split, without a table-count target
 
-Moving Apple Ads content into `apple_ads.action_content` adds zero tables. The draft extracts **six** provider-owned extensions: `app_store_connect.listing_contract`, `google_play.listing_contract`, `app_store_connect.step_contract`, and one `attempt_receipt` relation in each of the three current provider schemas. This accounts for the exact 25 → 31 change.
+Moving Apple Ads content into `apple_ads.action_content` adds zero tables. The current draft extracted **six** provider extensions: two listing contracts, one ASC upload-step contract and three provider receipt relations. This explains the historical 25 → 31 delta; it does not establish that every extraction should survive redesign.
 
-The split prevents unrelated provider columns from accumulating in common workflow rows and gives each extension native constraints. It costs joins, subtype sealing rules and a larger migration surface. Normalization does not require every one-to-one subtype to be physically separate; a strictly constrained smaller design remains possible. The recommendation is to retain these cohesive provider contract boundaries, then require their cross-schema invariants and migration proof before cutover.
+| Candidate | Reasonable alternative | Invariants the alternative must preserve |
+| --- | --- | --- |
+| Three provider receipt tables | One finite, discriminated receipt relation | Exactly one receipt per applicable attempt; transport compatibility; finalized interaction; tenant ownership; immutable evidence. An ordinary CHECK cannot inspect the parent attempt's transport, so a cross-row constraint remains necessary. |
+| Small Play listing contract | Store-specific columns in listing content | Android target/account requirements, non-Android forbidden fields, approved commit policy and observation-only edit facts. |
+| Notes, terms, countries and competitors | A closed ordered-item relation, only if its full matrix is simpler | Existing subtype ownership, role, value validation, ordering and gloss meaning. Country/competitor rows currently reference request content; notes/terms reference revisions. Similar-looking columns do not make their foreign keys interchangeable. No extensible property/value model. |
+| Dependency relation | Defer the capability if it is outside the agreed release | The prototype already exposes a dependency reader, although no producer was found. Removing the table requires removing or deferring that behavior explicitly. |
+| Research fields inside listing/request content | Keep proposal rationale with its revision; place independently owned run telemetry with its source | Decide from actual meaning and lifetime. Moving every research field into a one-to-one table is not inherently more normalized. |
 
-The [actual field catalog](Fload-Inbox-Current-Fields.md) and [SQL](Fload-Inbox-Current-Schema.sql) now show this split concretely. The earlier [144-column ownership audit](provider-boundary-field-audit.md) explains the classification of the mixed design; it is historical evidence and must not be used as the current column count.
+A one-to-one provider subtype can share a table when a closed discriminator enforces all required, forbidden and optional fields. Multiple values, different identities or different lifetimes usually require separate relations. These are design choices to evaluate with concrete DDL and constraint tests, not automatic reductions to 23, 25 or 27 tables.
+
+Multiple PostgreSQL schemas can make ownership and privileges explicit. A single `actions` schema with enforced module boundaries is also valid. Neither arrangement provides tenant isolation by itself. Cross-table invariants and transaction cycles exist even when both tables use the same namespace; changing names does not eliminate them. Choose after evaluating grants, introspection, backup/restore, migration and cleanup tooling.
+
+The [actual field catalog](Fload-Inbox-Current-Fields.md) and [SQL](Fload-Inbox-Current-Schema.sql) remain the unchanged draft. The earlier [field ownership audit](provider-boundary-field-audit.md) describes the mixed predecessor, not the current field count or a validated replacement.
+
+### Strict variants and real database boundaries
+
+For every closed content variant, specify a field matrix: **required, optional or forbidden**. Enforce that matrix in wire validation and database constraints. In particular, an agent-attention advisory must not carry market-audit fields, and a request must not accumulate fields from unrelated intents. An enum or text constrained to a finite CHECK can both be closed storage; neither replaces the field matrix.
+
+Complete tenant validation for API-key attribution, actor-agent-run references and attempt connectors. Existing source-provenance checks already cover many domain references; preserve those rather than treating all source references as unchecked. Frozen provider account identity remains distinct from the current connector used to authenticate.
+
+The prototype's tenant policies do not prove runtime isolation. Local owner-role access bypasses RLS; the deployed role's ownership and bypass privileges have not been established by this review. Define a non-owner application role and explicit tenant transaction scope, plus narrowly authorized cross-organization recovery/resource operations. Validate list, claim, due scans, migrations and erasure under those actual roles. Blindly adding FORCE RLS can break recovery and locking; deleting policies removes protection. See the [migration plan](Fload-Migration-and-Data-Plan.md) for these release gates.
+
+### Migration and deletion are part of ownership
+
+Migration 0146 contains a standalone session `SET search_path`, while the migrator runs pending files on one connection in one transaction. Later unqualified DDL can land in the wrong namespace. Qualify the migration's DDL and remove the leaked session setting; preserve the caller's original path if migration code changes it. SET LOCAL alone is insufficient across files sharing that transaction. A same-run sentinel migration must prove later unqualified public DDL lands correctly. A lint check must distinguish session statements from legitimate function-local search-path attributes.
+
+Provider and source references must also survive authorized deletion. The draft's deferred NO ACTION references can block connector uninstall, integration removal and source/agent cleanup while the organization still exists. Existing organization/user erasure handling does not solve those cases. Decide per reference whether a stable snapshot, narrowly allowed nullification, or a tombstone retains the necessary evidence. Updating an FK to SET NULL is insufficient when immutable guards reject that update; cascading deletion of approval or receipt evidence is not an acceptable shortcut.
 
 ## 4. The typed seam
 
@@ -97,7 +121,7 @@ The public registry remains a closed set of supported capabilities. For example,
 4. **Execute:** use the frozen plan, current authorization and the appropriate adapter. Queue payloads carry durable references, never new content or authority.
 5. **Observe:** decode and preserve provider-specific evidence; translate it into a closed common classification for Actions. No catch block may turn an ambiguous write into known failure.
 
-Provider-specific rows reference the common revision/step/attempt with explicit composite tenant-safe FKs. Sealing enforces the right subtype and exactly the required content. Do not replace real FKs with a `(table_name, record_id)` pointer. Shared recognition of capability identifiers is an intentional extension point; provider branches and vendor fields do not belong in the lifecycle implementation.
+The target contract requires provider-specific rows to reference the common revision/step/attempt with explicit composite tenant-safe FKs. Sealing must enforce the right subtype and exactly the required content; the revised constraint matrix must demonstrate that guarantee. Do not replace real FKs with a `(table_name, record_id)` pointer. Shared recognition of capability identifiers is an intentional extension point; provider branches and vendor fields do not belong in the lifecycle implementation.
 
 Keep common policy where it has the same meaning. Money can have a shared exact-decimal representation, while budget scope, period, pacing, object type and provider encoding remain explicit. “Campaign,” “status” and “budget” being shared words is not proof of interchangeable behavior. Use common projections for reporting where useful without forcing one universal write model.
 
@@ -143,8 +167,12 @@ Review side effects, not function names. A provider helper called “read” can
 - Cross-schema atomic rollback leaves neither partial content nor orphan approval/execution records.
 - Provider observation cannot rewrite authorization or erase an uncertain attempt.
 - Provider console edits and hidden read-session effects are covered by contract tests.
-- Full migration/seed/cleanup/RLS/restore tests include every introduced schema.
+- Full migration/seed/cleanup/restore tests include every introduced schema and a subsequent same-run migration.
+- Every variant rejects forbidden fields, missing required fields and cross-tenant references at both wire and database boundaries.
+- Connector, integration, agent/source, user and organization deletion each follow tested retention rules without bypassing immutable history.
+- Non-owner application access and bounded worker access prove RLS behavior, including global resource exclusion and due scans.
+- Recognized database business conflicts map to closed application errors; unexpected integrity failures remain diagnostic failures.
 
-The exact draft migrations now compile and have been applied in isolated repository test databases; the exported catalog is tied to their hashes. Focused provider, command and storage tests provide partial proof. They do not establish a completed cutover, full repository validation, or production readiness. See the [implementation checkpoint](Fload-Implementation-Checkpoint.md) and [migration plan](Fload-Migration-and-Data-Plan.md) for the remaining gates.
+The exported catalog records the paused draft; successful isolated migration runs do not establish safe later migrations, complete subtype enforcement, deletion compatibility or production readiness. Historical focused tests provide partial evidence only. Some checkpoint totals lack reconstructible retained proof, and some retained runs failed. When implementation resumes, record the exact command, timestamp, source fingerprint, outcome and output for each required suite. Do not present the current catalog or an unimplemented smaller design as validated. See the [review resolution](Fload-Review-Resolution.md), [implementation checkpoint](Fload-Implementation-Checkpoint.md) and [migration plan](Fload-Migration-and-Data-Plan.md).
 
 Supporting source and field audits: [field ownership](provider-boundary-field-audit.md), [execution and provider effects](provider-boundary-execution-audit.md).

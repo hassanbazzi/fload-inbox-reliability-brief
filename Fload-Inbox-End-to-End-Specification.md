@@ -4,6 +4,8 @@
 
 **Documentation is the current deliverable. Implementation is paused.** This packet describes the recommended end state, the actual schema now drafted in the repository, evidence from focused tests, and the remaining work required before a clean cutover. It does not claim the overhaul is implemented or ready to ship.
 
+**Independent review update:** retain the durable-ticket foundation and revise the architecture before implementation resumes. Recovery exits, strict subtype constraints, deletion/retention, tenant references, producer convergence and reproducible evidence are release gates. [Review response R01–R12](Fload-Review-Resolution.md) records confirmed findings, corrections and acceptance tests; [reviewer handover](Fload-Reviewer-Relay.md) explains the next review task. The actual DDL/catalog remains unchanged and is not the corrected final design.
+
 [Visual walkthrough](https://hassanbazzi.github.io/fload-inbox-reliability-brief/) · [Every field and constraint](Fload-Inbox-Current-Fields.md) · [Exact draft migration SQL](Fload-Inbox-Current-Schema.sql) · [Implementation checkpoint](Fload-Implementation-Checkpoint.md)
 
 ## 1. The team walkthrough
@@ -45,7 +47,7 @@ The source audit is retained as a dated investigation. The [entrypoint plan](Flo
 | External provider | Its current resource state, moderation and publication | Exclusive Fload control; another user may change it later |
 | Experiments / analytics | Measurement windows and results | That “submitted” means “measured” |
 
-Use one PostgreSQL database with explicit schemas: `actions`, `apple_ads`, `app_store_connect`, `google_play`. These are Fload-owned namespaces, not provider access or separate services.
+The current draft uses one PostgreSQL database with schemas `actions`, `apple_ads`, `app_store_connect`, `google_play`. These are Fload-owned namespaces, not provider access or separate services. Retaining four namespaces is a design choice to evaluate through ownership, grants and operational cost; normalization does not require it. Provider-specific types and protocols remain explicit in either physical layout.
 
 A future Meta implementation adds only its actual native contract, adapter, permissions, migration and tests. It does not add Meta-specific fields to `actions.action`, reinterpret Apple budget fields, clone the lifecycle, or introduce an open provider payload. There is no speculative Meta write schema in this design.
 
@@ -69,7 +71,7 @@ The explorer is generated from the exact repository migrations loaded in an isol
 
 The earlier 25-table design mixed provider fields into common relations. Moving Ads content into `apple_ads` changes its owner without adding a table. The separate ASC/Play listing contracts, ASC step contract and three provider receipts add six tables. That accounts for the full 25 → 31 change.
 
-This is a replacement domain design, not a claim that 31 tables are the net production increase. The net change cannot be stated honestly until the old-table retirement and historical-evidence migration are complete. No additional generic job table, event store, parent-ticket table or table per operation is proposed.
+This is the paused replacement-domain draft, not an approved table-count target or a claim that 31 tables are the net production increase. Receipt and listing-contract consolidation are under review; each smaller alternative must preserve ownership, transport compatibility and immutability. The net change cannot be stated honestly until the old-table retirement and historical-evidence migration are complete. No additional generic job table, event store, parent-ticket table or table per operation is proposed.
 
 ### Read the central records
 
@@ -88,7 +90,7 @@ These are an orientation, not the complete field list. [All 497 fields, constrai
 
 The grain of each relation is deliberate: one ticket, one revision, one membership, one command target, one approval, one native effect, one attempt, one personal read watermark. Those identities have different cardinalities and lifetimes.
 
-A revision can contain several terms, countries, competitors or media slots. They are ordered child rows with explicit fields and closed roles. They cannot invent new property names. Optional SQL columns are constrained by the operation/subtype; an all-optional bag is not the model.
+A revision can contain several terms, countries, competitors or media slots. They are ordered child rows with explicit fields and closed roles. They cannot invent new property names. **The existing advisory/request subtype constraints are incomplete:** named typed columns still admit invalid combinations. The revised design must specify required, forbidden and optional fields for every variant and enforce that matrix in wire contracts and SQL. A generic ordered-item merge must preserve request ownership of countries/competitors and the distinct value semantics of terms/notes.
 
 A revision owns title, summary and rationale once. Approval points to the revision instead of copying its content. History is projected from immutable records rather than maintained as another lifecycle database. Provider detail rows point to their revision, step or attempt with real foreign keys.
 
@@ -107,11 +109,13 @@ Decision and execution are distinct dimensions.
 
 Approval is not completion. Archive/snooze are shared placement choices; they cannot erase uncertainty. Read/unread remains personal. Generated content returns to an open unapproved revision. A rejected ticket keeps its identity and content. Restoration cannot silently restore publication authority.
 
-Every accepted/refused/conflicting command records actor kind, stable subject, available user/API-key/agent-run/policy identity, channel, idempotency key, digest, timestamp and exact target changes. Assignment identifies the current owner; approval attribution comes from the immutable approval command, not from whoever owns the ticket now.
+The required command contract records accepted/refused/conflicting outcomes with actor kind, stable subject, available user/API-key/agent-run/policy identity, channel, idempotency key, digest, timestamp and exact target changes. Assignment identifies the current owner; approval attribution comes from the immutable approval command, not from whoever owns the ticket now.
 
 API impersonation must record the real authorized operator and the represented organization/member context. Slack/Discord integration installation is not proof of sender membership. Until a verified member mapping exists, those channels link to the permanent ticket for a signed-in decision.
 
 Policy grants are explicit and versioned. An old “automatic” mode setting is not a policy grant. Workers recheck revocation and current entitlement before dispatch. The audit preserves original opaque actor identity even if a deleted member's personal name must be scrubbed.
+
+The prototype still has attribution gaps: impersonated web chat conflicts with its stored channel/delegation CHECK, and some API-key, actor-run and attempt-connector references lack tenant invariants. Database conflicts can bypass intended typed command history. These are unfinished implementation requirements, not reasons to weaken actor attribution. A full retention matrix must preserve truthful history when connectors, integrations or agent runs are removed.
 
 ## 6. Atomic commands and exact approvals
 
@@ -136,6 +140,8 @@ Iteration and approval share the same ticket lock and version condition. One win
 
 The Reviews domain supplies the native review and source snapshot. The actionable reply becomes a durable child with exact response text, intent, target and baseline. A parent revision pins its children in order. A fresh incoming review does not join an already approved decision scope.
 
+The current catch-up producer and ordinary reply producer do not yet share a convergent identity rule. Historical rejection suppression and changed-source reopening must be defined once across generation and discovery. The existing-draft UI already iterates canonically; the separate generation HTTP endpoint can still return old human-owned content while charging usage. These are cutover gates.
+
 Approval selects child revisions. Each child has its own execution, retry and result. The parent continues to show partial progress. Retry skips confirmed effects and inspects uncertain outcomes before any new send.
 
 If a reply appears outside Fload, persist an observation and a non-authorizing “handled externally” resolution. Do not manufacture an approval or claim that Fload posted it. If the source review changes, the exact source snapshot is a precondition; a known local mismatch prevents dispatch. External API limitations still prevent a universal remote compare-and-swap guarantee.
@@ -158,7 +164,7 @@ Freeze the concrete provider account, app, locale, editable/live target identity
 
 App Clip work additionally freezes media bytes, object identity, checksums, dimensions and intended subtitle/header operation. Approval must preview those exact bytes. Native reservation/upload/commit steps may be materialized from a typed reservation receipt only where that protocol does not change the reviewed material content. A changed payload or target requires a new revision.
 
-“Saved in editable release” and “verified live” remain separate. A later release is not a reason to keep a mutation lock forever. Revert work requires the exact prior snapshot and a fresh approval; it is not a pointer instructing a future worker to guess the old text.
+“Saved in editable release” and “verified live” remain separate. Pending publication needs a durable waiting obligation and bounded observation. Release mutation exclusion only after all issued writes are resolved; elapsed time or a polling budget is not proof of non-application. App Clip lost-confirmation recovery must reconstruct the exact reserved resource from sufficient typed evidence without requiring the missing old receipt. Revert work requires the exact prior snapshot and a fresh approval; it is not a pointer instructing a future worker to guess the old text.
 
 ### Apple Search Ads
 
@@ -180,9 +186,11 @@ There is **no new generic job table** and no second SQL scheduler.
 
 The worker-owned recovery scan uses database due times and pagination. It repairs lost wakeups and expired claims. API replicas remain stateless and own no polling loop.
 
-Before I/O, a worker validates current authority and target, claims the relevant provider resource and commits a started attempt. After I/O, it atomically persists the receipt, result and next obligation. If confirmation fails after a provider success, that started attempt remains unresolved and forces readback.
+Before I/O, a worker validates current authority and target, claims the relevant provider resource and commits a started attempt. After I/O, it atomically persists the receipt, result and next obligation. Persist the same captured outcome again after a transient confirmation failure, recognizing an already-committed result after ambiguous commit. Do not resend the provider call to save a receipt. If usable confirmation is lost, the started attempt remains unresolved and requires provider reconciliation.
 
 A lease fence protects database transitions; it cannot cancel an HTTP request already inside a provider. An absent/mismatched readback does not, by itself, prove a timed-out write will never apply. Only conclusive non-application or an applicable native idempotency guarantee permits another effect.
+
+Automatic observation must have durable budgets and backoff, then a visible waiting or reconciliation hold. Stopping polling does not change mutation certainty. Incomplete plans need deterministic continuation or an explicit hold, never completion. Definitive permanent rejection may settle the old execution and reopen the same ticket only when all issued effects are resolved; a new proposal needs fresh approval. Same-ID delayed queue jobs need actual promotion/reconciliation, not another duplicate add. Resource scope must follow native conflicts, and actual consumption must retain idempotent billing provenance. These are revisions required by [R01–R04 and R09](Fload-Review-Resolution.md), not guarantees already completed in the prototype.
 
 The earlier proposed `action_job` relation is withdrawn; there is no standalone `job` table in the audited current schema. Existing capability-execution records, dispatch fields on pending actions, agent runs and old inbox iteration queue jobs must be classified by their actual owner. Retain transport observability and business-domain outputs; remove duplicated approval, retry and completion authority after migration. The [execution and cutover plan](Fload-Execution-and-Cutover-Plan.md) gives the queue inventory, provider recipes and deletion gates.
 
@@ -190,7 +198,7 @@ The earlier proposed `action_job` relation is withdrawn; there is no standalone 
 
 List and count use the same organization/asset/parent/domain/owner/view predicate. Count all eligible tickets before applying the page limit. Use stable keyset cursors with database timestamp precision and ID tie-breaking. A limit is a page size, not a hidden total cap.
 
-Selecting an app includes organization-wide work, so connector advisories remain reachable. Parents and children are independently addressable tickets; list/count must explicitly use the same counting unit. Do not display a parent count beside a child-work total.
+Selecting an app includes organization-wide work, so connector advisories remain reachable. Parents and children are independently addressable tickets; list/count must explicitly use the same counting unit. Do not display a parent count beside a child-work total. The prototype currently includes parent and child rows and treats queued/working/verifying work as needs_attention; shared filters do not settle those product choices. The recommended design separates decision-needed and processing views, with an explicit top-level versus child scope. Parent summaries must expose actionable children even when a filter matches only a child. Finalize and test that view contract before claiming counting correctness.
 
 Personal read state is a monotonic seen-attention watermark plus an explicit unread flag. Meaningful progress, a new revision or a newly blocked outcome can advance attention. Repeated polling/claims with no material change stay silent.
 
@@ -203,6 +211,8 @@ The migration is not “copy old status into new enum.”
 Inventory every source and queue page; fingerprint the records used to prepare the plan. Produce deterministic typed mappings and stable identity/alias resolution. Apply in bounded transactions with source rechecks. Replaying an import must return the same identities and never create a second executable obligation.
 
 Separate current content, original approval facts, personal overlays, native receipts and queue state. Conflicting personal snooze/dismissal values require an explicit shared-workflow disposition. Unknown statuses block classification. Historical membership is not inferred from today's pending rows.
+
+Migration DDL must be fully qualified; session search_path currently leaks across migration files sharing a transaction. Add a sentinel migration to that same chain/connection. Specify per-reference retention/erasure behavior and tenant/worker roles before changing FKs or RLS. Deletion must preserve receipts and approvals without creating impossible actor rows.
 
 Current unapproved imports have focused test coverage. Historical rejection snapshots, review history, request events, previously approved/failed work, edited original AI content, restore snapshots and uncertain delivery require further implementation.
 
@@ -219,23 +229,21 @@ The [migration/data plan](Fload-Migration-and-Data-Plan.md) contains the source-
 | Commands | Same-key retries; altered-key payload conflicts; approve versus iterate; undo versus worker claim; lost HTTP response |
 | Revisions | Stale content refused; immutable baseline; user edit preserved; generation output committed then worker crash |
 | Collections | Stable batch handoff; new review excluded; partial results; selected child pin mismatch; sibling generation and parent revision races |
-| Providers | Success then failed confirmation; late success; unreadable response; mismatch while old write may apply; definitive rejection; adapter-version mismatch |
+| Providers | Success then failed confirmation; ambiguous commit deduplication; lost reservation receipt; late success/plan continuation; bounded unreadable/mismatch observation; pending publication; permanent rejection and safe reopen; adapter-version mismatch |
 | Localizations | Derivation convergence; exact locale/field/consent and credit scope; existing external locale; App Clip bytes/steps; editable versus live |
-| Migration | Full journal; replay; more than former caps; duplicates; unknown states; incomplete approval evidence; alias conservation; unresolved queue work |
+| Migration | Full journal plus same-connection sentinel; replay; more than former caps; duplicates; unknown states; incomplete approval evidence; alias conservation; deletion/erasure retention; real app/worker role constraints; unresolved queue work |
 | Authorization | Cross-tenant denial; API-key scope; membership revocation; policy revocation; deleted asset; real impersonating operator; external sender mapping |
 | Read model | Same list/count predicate; microsecond cursor ordering; organization advisories under app filter; personal reads never mutate workflow |
 | Product | Exact content/media preview; ownership/history; unknown acceptance retry; partial batch display; all entrypoints use the same commands |
 | Repository | Typecheck, lint, relevant unit/integration/build checks, authorization/provider-boundary inventories and Semaphore CI |
 
-The [checkpoint](Fload-Implementation-Checkpoint.md) records which focused tests already passed and which remain failing or unvalidated. No production deployment is part of this work.
+The [checkpoint](Fload-Implementation-Checkpoint.md) distinguishes retained historical passes, failing logs, unsupported aggregate claims and unvalidated current behavior. No fresh application tests were run for this documentation response. The claimed 22 core pass and combined advisory/ads pass require reconstructible evidence; a file named progress-green actually records a failure. Each next validation needs its exact command, timestamp, source fingerprint and retained result. No production deployment is part of this work.
 
-## 12. What changed in this documentation revision
+## 12. What changed after independent review
 
-- Replaced the stale 25-table explorer with the actual four-schema, 31-table migration catalog.
-- Added every current field, foreign key, closed enum, index, trigger and relational projection.
-- Explained the six-table provider split and normalization tradeoffs.
-- Consolidated internal/external ownership, queue responsibilities and exact approval semantics.
-- Added dedicated entrypoint/ownership, execution/cutover and migration/data plans.
-- Included the prototype's test evidence, known failures and incomplete handoffs instead of presenting a design proof as implementation completion.
-- Preserved the earlier investigations as dated supporting evidence; private customer/queue census output remains unpublished.
-
+- Added [R01–R12](Fload-Review-Resolution.md), with confirmed blockers, qualified findings, rejected unsafe remedies and acceptance evidence.
+- Kept the actual schema catalog unchanged while explicitly requiring subtype constraints, retention rules and constraint-preserving consolidation decisions.
+- Expanded recovery to cover bounded observation, safe failure reopening, lost confirmation, incomplete plans and actual delayed-job promotion.
+- Added migration search-path, deletable-reference and tenant-role gates; updated producer identity, billing, attribution, counting and attention requirements.
+- Corrected overstated test claims and distinguished source inspection from runtime proof.
+- Added a public reviewer relay; preserved the local implementation and current field explorer for comparison. No application change, new main pull, PR or deployment was made for this update.

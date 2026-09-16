@@ -6,6 +6,8 @@
 
 Exported from the exact repository migrations applied to an isolated synthetic test database. This is the paused prototype’s proposed schema, not the deployed schema. Full implementation and migration cutover remain incomplete.
 
+**Review update:** this unchanged schema requires a further design pass for subtype constraints, history retention, tenant invariants and consolidation. [R01–R12 review resolution](Fload-Review-Resolution.md) distinguishes required changes from current fields. No revised table count or corrected DDL is implied.
+
 The public catalog format is JSON for browser distribution. The database model has no JSON/JSONB, array or arbitrary key/value columns. No customer rows are included.
 
 [Walkthrough](Fload-Inbox-End-to-End-Specification.md) · [Migration plan](Fload-Migration-and-Data-Plan.md) · [Validation checkpoint](Fload-Implementation-Checkpoint.md)
@@ -130,7 +132,7 @@ Keys and constraints:
 
 ### actions.action_dependency
 
-One typed prerequisite between tickets. Workflow changes never recreate the dependent ticket.
+One typed prerequisite between tickets. Detail reads it, but the current draft has no producer. Retention or deferral is a review decision.
 
 | Field | PostgreSQL type | Nullable | Default |
 |---|---|---|---|
@@ -758,7 +760,7 @@ Keys and constraints:
 
 ### actions.action_request_content
 
-One closed request subtype with language, review window, research facts or actual agent target. Required producer parity extensions are listed in the cutover plan.
+One request subtype with language, review window, research facts or actual agent target. Required/forbidden subtype constraints and producer parity remain incomplete; see R05.
 
 | Field | PostgreSQL type | Nullable | Default |
 |---|---|---|---|
@@ -817,7 +819,7 @@ Keys and constraints:
 
 ### actions.action_advisory_content
 
-One typed informational or prerequisite item. Acknowledgment records a decision without pretending that an external effect occurred.
+One informational or prerequisite item. Acknowledgment does not imply an external effect. Required/forbidden subtype constraints remain incomplete; see R05.
 
 | Field | PostgreSQL type | Nullable | Default |
 |---|---|---|---|

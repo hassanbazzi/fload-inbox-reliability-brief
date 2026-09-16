@@ -1,6 +1,6 @@
 # Fload inbox — clean migration and data plan
 
-**Status: design and evidence handoff, 16 September 2026.** Source review is grounded in `f0b1af5fc` plus an uncommitted, paused implementation prototype. Nothing described here has been deployed. Passing a prototype test does not mean the complete cutover is ready. This document contains no customer data or production counts.
+**Status: design revision required; implementation remains paused, 16 September 2026.** Source review is grounded in `f0b1af5fc` plus an uncommitted prototype. The current **31-table, 497-column draft is unchanged**, not the approved destination schema. Independent review verified migration, retention, tenant-reference and content-constraint gaps. Nothing described here has been deployed; a passing prototype test does not establish complete cutover readiness. This document contains no customer data or production counts. See the [review resolution](Fload-Review-Resolution.md) for the full disposition and corrections to the external review.
 
 The migration must preserve what can be proved, make uncertainty explicit, and finish by removing the old workflow authority. Copying an old status into a new approval is not a migration proof. An approval requires a known actor, the exact reviewed revision, and exact selected membership. A receipt proves only the provider fact it actually contains.
 
@@ -44,14 +44,14 @@ Every source row receives a finite disposition: **imported**, **already mapped**
 
 ## Exact source/status decision matrix
 
-The prototype currently admits only provably unapproved current work. The following distinguishes that working subset from the final migration requirements.
+The prototype importer is intended to admit only provably unapproved current work. Its supported subset still has preflight/apply parity and overlapping-evidence gaps, so it is not ready for use as a complete migration. The following distinguishes existing behavior from the final requirements.
 
 | Source condition | Prototype behavior | Required final disposition |
 |---|---|---|
 | Pending action `pending_approval`, no approval/delivery/history markers, supported closed payload | Typed import after target/baseline capture and fingerprint check | Open ticket, exact revision, old ID alias; no inherited authorization. |
 | Pending action `approved` | Blocks `requires_recovery` | Prove actor, reviewed bytes and membership. If any pin is missing, require fresh approval for remaining work after provider reconciliation. Never create a perform grant from status alone. |
 | Pending action `executed` or `completed` | Blocks `requires_recovery` | Verify what the receipt proves: accepted write, editable state, live state or measured outcome. Preserve those as distinct facts. A provider readback may show external completion without proving historical Fload authorship. |
-| Pending action `failed` | Blocks `requires_recovery` | Determine known-not-applied versus uncertain application. Retry only the former; reconcile the latter first. Failure text alone is not proof of non-application. |
+| Pending action `failed` | Blocks `requires_recovery` | Distinguish conclusive non-application from uncertainty. A retry still requires valid authorization and provider retry policy. Permanent rejection can reopen editable work on the same ticket only after all effects are resolved; approve the new revision separately. Failure text, timeouts and exhausted readback budgets do not prove non-application. |
 | Pending action `rejected`, `expired`, `superseded`, deletion/rejection/successor markers | Blocks recovery/history import | Preserve actor/reason/timestamps and successor identity where known. Retired work is not revived as an open proposal. Tombstones remain explicit; old URLs resolve to their history. |
 | Any unknown status | Blocks `unknown_status` / `unrecognized_status` | Classify explicitly from source evidence or keep migration blocked. It can never become approved or successful by default. |
 | Draft reply: unsent, no pending send, no attempts/error/readback schedule, unchanged original/current draft | Typed import, or consolidation into parent | Exact review snapshot and reply bytes; send/update intent backed by observed provider state. |
@@ -106,27 +106,61 @@ The clean end state is one runtime workflow model. Keeping old source rows tempo
 - `action_alias` preserves old URLs and references. Aliases resolve to a permanent ticket; they do not define workflow state.
 - A structural `parent_action_id` makes a child a normal ticket with its own lifecycle and history. A separate membership row pins which child revision a particular parent revision included.
 - Current unapproved review drafts may be consolidated into one explicit package. Multiple old batch URLs can point to that package while retaining the fact that earlier membership is unproved.
-- A new review or newly discovered locale creates new work. It never silently joins an already approved membership revision.
+- A new review or newly discovered locale creates new work. It never silently joins an already approved membership revision. All producers must share one identity rule: catch-up and ordinary review discovery cannot create independently executable tickets for the same reply work. Changed-source reopening and rejection suppression require an explicit common rule.
 - Partial outcomes remain attached to the same parent. A retry selects unresolved children only, after readback for uncertain effects.
 - Original receipts and source IDs are never reassigned to unrelated work to make foreign-key counts match. Dangling references must be individually resolved or retained as explicitly unlinked evidence.
 
+## Retention and erasure are migration contracts
+
+The current draft has deferred NO ACTION references to rows that the existing product hard-deletes. Connector removal, integration uninstall and agent/source cleanup can therefore fail after an Actions record refers to them. This is distinct from organization/user erasure: the prototype contains narrow exceptions for those cases, not a general solution for independently deleted resources.
+
+| Reference family | Required decision before final DDL | Evidence and deletion gate |
+|---|---|---|
+| Attempt → connector; command → Slack/Discord integration | Preserve immutable remote target/account and attributable origin. Choose nullable live lookup plus stable identity snapshot, or an explicit retired connector/integration identity. | Uninstall succeeds without deleting or rewriting the approved target, receipt or outcome; reconnection cannot silently redirect old authorization. |
+| Command/source/attempt → agent run; request → agent | Separate historical attribution from a live executable target. Define which identity survives cleanup and which capability becomes unavailable. | Agent/run cleanup retains truthful history; an unavailable requested agent is not silently replaced. |
+| Revision source → recommendation, variant, experiment, report or backlog | Keep domain ownership; specify a stable retained source identity or an exact, bounded provenance snapshot. | Domain reset/deletion does not orphan history or fabricate a replacement source. |
+| Ticket/policy → asset | Decide whether app identity is tombstoned or represented by a retained identity snapshot; define asset removal separately from organization erasure. | Removing a dummy or real asset cannot erase approvals accidentally or make a ticket refer to a different app. |
+| Command/ownership → user or API key | Preserve the distinction between actual actor, delegated subject and unavailable attribution while applying the approved erasure policy. | User/key deletion allows only the intended reference/snapshot changes; retained personal data follows the erasure policy. |
+| Organization → owned Actions graph | Scoped organization erasure removes the graph and releases only that organization's resource ownership. | Test cycles, deferred guards and provider extensions under the actual runtime roles; never bypass all triggers. |
+
+For each field, the revised schema must state **retain, snapshot, nullify, tombstone or erase**, its exact FK action, allowed guard transition, and user-visible history. These are unresolved design choices, not permission to apply SET NULL everywhere. Nullification alone can violate immutable-row and actor-shape guards. Allow only the precise parent-deletion transition; normal updates must remain forbidden. Cascading deletion of approval/receipt evidence during connector or source cleanup is not acceptable. Broad trigger disabling and generic bypass flags are excluded.
+
 ## Migration gates and order
 
-| Gate | Required evidence | Prototype status |
+| Gate | Required evidence | Current status |
 |---|---|---|
-| 1. Complete source census | Every source/status/type/key combination, aliases, conflicting overlays, historical evidence and all queue states; no list caps | Full organization pending/request/draft/receipt/overlay census exists. It is not yet a complete historical-event/rejection importer. |
-| 2. Source mapping complete | Closed parsers, exact target fields, typed baseline capture, explicit unsupported disposition | Current unapproved replies, review packages, listing proposals, ASA operations, locale/listing requests and selected advisories mapped. Historical/restore cases remain blocked. |
-| 3. All producers/readers switched | Current entry points use Actions; no old direct inserts, approvals or browser timers remain authoritative | Partial prototype only. Orchestrator direct `pending_action` inserts and check-back lifecycle remain. Generic legacy staging helpers remain and need final caller census/removal. |
-| 4. Old queues quiescent | Running, waiting, paused, delayed, prioritized and waiting-child jobs reconciled; late workers fenced | CLI checks those Redis states for the identified legacy queues. A zero count alone does not prove all replicas are compatible or every provider effect is known. |
-| 5. Reviewed plan and capture manifest | Organization, source fingerprints, captured observations, canonical digest and one disposition per row | Strict private manifest/plan contracts and read-only preflight implemented. Some preflight paths still defer target/evidence validation to apply; make those agree before declaring readiness. |
-| 6. Apply idempotently | Atomic graph import, exact fingerprint recheck, stable aliases, no provider I/O in a DB transaction | Implemented for the supported subset; repeat/concurrent import and migration-chain tests exist. Apply is gated on quiescent queues and explicit compatible-writer acknowledgement. |
-| 7. Evidence/link reconciliation | Source and target census match by disposition; all historical links resolve; no fabricated authority; same-content digests match | Not complete. Receipt/history/rejection mapping is an explicit blocker. |
-| 8. Product parity | Exact list/count predicate, all pages reachable, old URLs resolve, personal read state independent, shared history attributed | Requires integrated end-to-end acceptance across every entry point. A schema proof cannot establish UI parity. |
-| 9. Contract cleanup | Remove superseded writes/reads/types/jobs/flags, then destructive source-table migration with rehearsal and rollback evidence | Not implemented. Do not drop evidence now. |
+| 1. Revised schema contract | Required/optional/forbidden field matrix for each closed variant; justified physical boundaries; complete tenant references and retention rules | Redesign required. The existing catalog remains a record of the paused draft. |
+| 2. Migration isolation | Fully qualified DDL; no leaked session search path; correct behavior of later pending migrations, seeds and cleanup | Confirmed 0146 search-path defect remains in the unchanged draft. |
+| 3. Real access roles | Application tenant transactions; explicit cross-organization worker/resource boundary; non-owner role tests for reads, writes and erasure | Local owner-role tests bypass RLS. Production role/bypass behavior has not been established; policies alone are not proof. |
+| 4. Complete source census | Every source/status/type/key combination, aliases, conflicting overlays, historical evidence and all queue states; no list caps or locking preflight | Current census covers substantial current-work data, but historical import and complete queue/group coverage remain gaps. |
+| 5. Source mapping complete | Closed parsers, exact target fields, typed baseline capture, deleted-asset policy and explicit unsupported disposition | Current unapproved replies, review packages, listing proposals, ASA operations, locale/listing requests and selected advisories have prototype mappings. Historical/restore cases remain blocked. |
+| 6. Coordinated producer/reader switch | Every entry point uses Actions; no direct legacy writer, approval path or browser timer remains authoritative | Partial only. New readers and old writers must not be released independently. Orchestrator inserts, staging and check-back paths still require convergence. |
+| 7. Old delivery quiescent | Running, waiting, paused, delayed, prioritized, waiting-child and grouped jobs reconciled; agent execution included; old replicas and late callbacks fenced | Current CLI coverage is incomplete. A zero count from selected queues does not prove compatibility or absence of an external effect. |
+| 8. Reviewed plan and capture manifest | One disposition per source; exact organization/asset/target; fingerprints, captured observations and canonical digest; preflight/apply parity | Contracts exist, but preflight must become read-only and non-locking. Some target/evidence checks remain deferred to apply. |
+| 9. Idempotent apply | Atomic graph import; lock/recheck source fingerprint; stable aliases; exact replay; no provider I/O in a DB transaction | Prototype subset exists with focused tests; complete import and final evidence remain unfinished. |
+| 10. Evidence/link reconciliation | All preserved identities mapped by disposition; historical links resolve; no fabricated authority; overlapping sources and receipts reconciled | Receipt/history/rejection mapping remains a blocker. One in-flight draft must be reported explicitly rather than hide other eligible work. |
+| 11. Product and recovery parity | Explicit counting unit and attention rules; all pages reachable; separate personal read; useful bounded recovery; attributable history | End-to-end acceptance required. Shared SQL predicates alone do not decide whether parents, children or both belong in the main count. |
+| 12. Contract cleanup | Remove old authority only after all previous gates pass; rehearse destructive migration, restore and rollback boundaries | Not implemented. Do not drop evidence now. |
 
-The prototype CLI emits `fullCutoverReady=false` while blocked sources, historical drafts, capability receipts, dangling receipt links or queued old work remain. This is deliberately conservative. The finalized readiness calculation must track **mapped receipt/evidence identities**, rather than requiring all historically legitimate audit records to disappear. It must not be weakened to ignore them.
+### Search-path proof must use the real migration boundary
 
-Apply is resumable per atomic source graph. A crash after one graph commits must replay its exact creation receipt and aliases, then continue with the next graph. A source edited after preflight must refuse rather than import a stale plan. Provider captures happen before the database transaction; they are immutable evidence, not instructions to read mutable provider state again during approval.
+Migration 0146 sets a session search path and never restores it. The migrator executes pending files on one connection inside one transaction, so subsequent unqualified DDL may land in the Actions namespace. The redesign must qualify DDL and remove the leaked setting, preserving the original session path if a change is necessary. SET LOCAL alone does not isolate migration files in the same transaction.
+
+Append a sentinel migration in the same run and verify its unqualified public table lands in `public`. A probe on a new connection misses this bug. Static checks should reject unintended standalone session changes while allowing legitimate function-local search-path attributes. Re-run the full chain and its idempotent second pass after the fix; an earlier clean replay without a later sentinel does not prove this property.
+
+### Tenant constraints and RLS must describe actual access
+
+The draft already validates many revision-source tenants. It still lacks complete API-key attribution, actor-agent-run and attempt-connector tenancy checks. Close those specific gaps with composite references or explicit validation, including the relationship between a key, its actor and its organization.
+
+Use actual database-role evidence to decide access policy. The application role must not rely unknowingly on table-owner bypass. Tenant queries, cross-organization due scans, global resource guards and deletion routines need an explicit, narrowly scoped access design. Blindly enabling FORCE RLS can disable recovery or locking; removing policies abandons protection. Non-owner tests must exercise both legitimate access and cross-tenant refusal, including operations outside the ordinary HTTP request transaction.
+
+### Apply, reconcile and recover
+
+The prototype CLI emits `fullCutoverReady=false` for named blocked-source conditions, but its incomplete census means that boolean is **not yet a complete release gate**. The final calculation must track mapped receipt/evidence identities and every relevant writer/queue, rather than require legitimate historical audit records to disappear or simply ignore them.
+
+Apply is resumable per atomic source graph. A crash after commit must replay the exact creation receipt and aliases, then continue. A source edited after preflight must refuse instead of importing a stale plan. Provider captures happen before the transaction and retain their capture time; no mutable provider lookup may change the approved target inside the transaction.
+
+Recovery must have explicit attempt/time budgets, backoff and an actionable hold. An exhausted observation budget preserves uncertainty and resource exclusion where unresolved effects require it; it does not authorize a blind retry. Pending external publication remains a durable waiting state when approval requires verified live content. Persisting captured provider evidence must itself be idempotent: after an ambiguous database commit, recognize the same evidence before attempting another provider call.
 
 ## What gets retired, what remains
 
@@ -136,9 +170,9 @@ Apply is resumable per atomic source graph. A crash after one graph commits must
 
 **Preserve before retirement:** review rejections and their suppression fingerprints; review-history snapshots; capability/recovery receipts, including uncertain and unlinked ones; old URLs, successor chains, approval attribution where provable, original content and dates. Do not delete a business-domain audit ledger just to advertise a smaller Actions table count.
 
-## Why 31 tables, and where that is a choice
+## What the 31-table draft means, and what remains a choice
 
-The actual applied 0146 + 0147 prototype has **31 physical tables and 497 physical columns**, plus three relational views. The 0147 progress amendment adds four columns and no tables. These counts describe a paused draft, not a promise that the cutover schema is complete.
+The unchanged 0146 + 0147 prototype contains **31 physical tables and 497 physical columns**, plus three relational views. The progress amendment adds four columns and no tables. These counts describe the paused implementation, which requires redesign; they are neither a target count nor a claim of complete validation.
 
 | Group | Tables | Grain |
 |---|---:|---|
@@ -147,39 +181,43 @@ The actual applied 0146 + 0147 prototype has **31 physical tables and 497 physic
 | Source links | 2 | Revision sources and existing identity aliases. |
 | Provider-specific contract/evidence | 7 | ASC listing contract, ASC step contract, ASC receipt; Play listing contract and receipt; Apple Ads content and receipt. |
 
-The prior design had 25 tables. The physical provider-boundary amendment adds exactly **six**: two listing-contract extensions, one ASC upload-step extension, and three provider receipt extensions. Moving the existing Ads content table into `apple_ads` adds zero. PostgreSQL schemas are namespaces in the same database, not separate services or databases.
+The preceding design had 25 tables. The provider-boundary amendment added six: two listing-contract extensions, one ASC upload-step extension and three receipt extensions. Moving existing Ads content into `apple_ads` added none. That historical explanation is not an argument for preserving every split.
 
-Normalization does **not** require every provider extension or one-to-one content subtype to have its own table. The six-table split buys explicit provider ownership, provider-specific constraints and fewer irrelevant fields in shared protocol rows. It also costs joins, deferred cross-table invariants and a larger migration surface. A 25-table variant with strict closed provider subtypes and well-enforced module ownership is a legitimate alternative if physical separation does not deliver a concrete maintenance benefit. The diagram must show that choice honestly.
+Normalization does **not** require every one-to-one subtype to have a separate table or every provider to have a PostgreSQL namespace. Evaluate these concrete alternatives without choosing an arbitrary smaller count:
 
-Several separate grains are substantially harder to merge safely:
+- Consolidate provider receipts if exactly-one, transport compatibility, finalization, tenant scope and immutability remain enforceable. A normal CHECK cannot inspect the parent attempt's transport; consolidation does not eliminate all cross-row validation.
+- Fold the small Play listing contract into listing content if store-specific required and forbidden fields remain strict.
+- Consider a closed ordered-item relation only after preserving subtype ownership, value semantics and keys. Countries/competitors currently reference request content; notes/terms reference revisions. A generic extensible property/value bag is not acceptable.
+- Defer dependency behavior only as an explicit scope decision. A reader already exists, despite the missing producer; removing the table is not behavior-neutral.
+- Separate independently owned generation telemetry from reviewed proposal rationale where their meaning and lifetime differ. A new one-to-one research table does not inherently improve normalization.
 
-- Ticket versus revision: one mutable pointer versus many immutable content versions.
-- Structural parent versus membership: permanent relationship versus the exact children/revisions seen in a particular package.
-- Command versus target: one attributable batch action versus many per-ticket preimages/results.
-- Approval versus execution: immutable reviewed authority versus mutable delivery progress and retries.
-- Step versus attempt: one intended provider effect versus repeated/late writes and observations of that effect.
-- Shared ticket versus personal read: organization decision versus one user's attention watermark.
-- Notes/terms/countries/competitors/media: multiple independently keyed values; flattening them into JSON/arrays or repeating the whole ticket creates update anomalies.
+Distinct identities and lifetimes still matter: ticket versus revision; structural parent versus approved membership; command versus multiple targets; approval versus delivery; intended step versus repeated attempts; shared workflow versus personal read. Repeated typed facts cannot be flattened into JSON/arrays or duplicated across whole ticket rows merely to reduce table count.
 
-Some deliberate consolidations reduce unnecessary structure: all seven active ASA operations share one closed content table; current advisory variants share one closed content table; baseline and observation snapshots reuse their concrete content family; there is no duplicate generic event log, no provider-specific approval lifecycle, and no generic job-payload table. Timeline views combine immutable facts already owned by commands, revisions, approvals and attempts.
+The advisory and request tables need complete subtype field matrices. Named columns alone do not prevent an advisory from carrying unrelated audit data or a request from mixing intents. Enforce required, optional and forbidden fields at both wire and database boundaries. An enum and text with an enforced finite CHECK can both represent closed storage; neither excuses missing shape constraints.
 
-## Tested prototype versus unfinished work
+Provider namespaces can make ownership and privileges visible, but are optional and do not automatically isolate tenants. A single Actions schema with strong module boundaries is a valid alternative. Joins, cross-table invariants, migration tooling and operational grants must inform that decision. See the [provider-boundary review](Fload-Provider-Boundary-Review.md) for the alternatives; the field explorer remains unchanged until revised DDL has its own evidence.
 
-Completed evidence in the paused prototype includes full migration-chain setup, idempotent/concurrent materialization, exact baseline and stale approval protections, review-batch consolidation, source fingerprint refusal, cross-tenant refusal, per-user read preservation, and scoped organization/user erasure. Relevant completed runs include 18 materialization/observation/reply/batch integration cases, 10 source-migration/erasure cases, and a later 8-case ASA/advisory producer run. These are separate focused runs, not a claim that the entire repository suite passed.
+## Evidence checkpoint and unfinished work
 
-The latest ASA acceptance suite passed 45 unit cases covering the seven HTTP operations, chat scope/intent, retained bid/currency safeguards, strict proposal parsing and complete provider baseline capture. ASA creation/approval tests prove no provider write occurs during acceptance and retries return the original durable result.
+The prototype includes focused tests for migration setup, materialization, observations, replies, batches, source fingerprints, read state and erasure. Those files and historical successes do not certify the final paused source. Independent assessment found both passing and failing retained runs; some previously reported totals, including a combined ASA/advisory pass, could not be reconstructed from the available retained evidence. Those totals have therefore been removed as readiness claims.
 
-The last complete storage harness passed 87 assertions plus its concurrency and migration rerun checks. Four subsequently added App Clip absent/incomplete-header fixtures initially failed because the test attempted to edit immutable revision metadata; that fixture was corrected, but the corrected run was **not completed before implementation paused**. Later additive progress work and the latest full-worktree typecheck remain outside that validated baseline. Do not describe the entire new schema as fully validated yet.
+Later retained passing examples cover dispatch/listing integration (9 cases), generation baselines (3) and read/filter behavior (5). These are separate scoped runs, not a complete branch pass. The microsecond cursor regression is valid: its fixture seeds distinct database microseconds and the cursor preserves them. Neither that result nor a schema replay establishes performance at production scale or full cutover safety.
+
+The standalone storage proof is not yet wired into CI. Repository unit/integration suites are already discovered by the existing pipeline; it would be inaccurate to say no CI test discovery exists. When implementation resumes, retain a ledger containing **suite, exact command, timestamp, base commit plus source fingerprint, result and output**. Rerun the required suites against the actual revised source; do not infer success from a log filename or aggregate runs across changing code.
 
 Required remaining work before a real cutover:
 
-1. Resolve the closed historical-evidence import contract, rejection suppression, request events, edited original drafts, tombstones and successor chains.
-2. Close preflight/apply parity gaps, including overlapping batch receipts and full target/capture validation.
-3. Complete or explicitly retire every current producer, old reader, check-back path and transport callback; orchestrator direct writes remain a known example.
-4. Recover restore snapshots and App Clip source/media pins for applicable existing work; do not silently omit old effects.
-5. Rehearse a full migration on representative isolated data, kill/restart at each commit boundary, and prove all links/evidence are retained.
-6. Complete integrated list/count/pagination/history and concurrency/retry/crash tests, full typecheck/lint/repository-required suites, and UI walkthroughs.
-7. Only then generate and validate the destructive contract cleanup. No production deployment is part of this work.
+1. Finalize subtype constraints, justified table/module boundaries, reference retention, real database roles and migration search-path isolation.
+2. Resolve non-authorizing historical evidence import, rejection suppression, request events, edited original drafts, tombstones and successor chains.
+3. Close preflight/apply parity, non-locking census, deleted-asset disposition, grouped/agent queue coverage, overlapping batches and exact capture validation.
+4. Converge every producer, reader, check-back path and transport callback behind one release gate. Unify review identity and changed-source reopening; do not discard generated output while charging for it.
+5. Complete bounded recovery and safe reopening after conclusive non-application, recover exact App Clip reservation/media evidence, and validate provider authentication contracts. Google's documented review-conflict commit policy must not be removed because of the review's incorrect claim that it is undocumented.
+6. Meter worker generation with attributable, idempotent charging and crash-aware consumption accounting. Define attention changes and list/count units explicitly.
+7. Rehearse the full migration on representative isolated data, inject crashes at commit boundaries, and prove links, history, tenant isolation and authorized deletion behavior.
+8. Complete repository-required checks, precise SQL-conflict mapping, provider contract tests, integrated pagination/history/concurrency/recovery tests and UI walkthroughs. Retain reproducible evidence for the final source.
+9. Only then generate and validate destructive cleanup, including restoration and rollback boundaries. No production deployment is part of this work.
+
+The [review resolution](Fload-Review-Resolution.md) distinguishes confirmed defects, qualified claims and design alternatives. This documentation update changes the plan and readiness claims only; platform code, DDL and the catalog remain paused and unchanged.
 
 ## Source pointers
 

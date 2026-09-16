@@ -17,6 +17,11 @@
       "sha256": "76d2dd3b797257d7d53895a01ac60ee0c07e76578109746550806101aa0d94c2"
     }
   },
-  "fullApplicationValidation": "incomplete; known failing HTTP acceptance regression",
-  "scope": "Proposed schema from paused, uncommitted application prototype; exact repository migration chain applied to isolated synthetic test database; not production"
+  "fullApplicationValidation": "incomplete; known failing HTTP and other retained regression logs; several prior aggregate pass claims not reconstructible",
+  "scope": "Proposed schema from paused, uncommitted application prototype; exact repository migration chain applied to isolated synthetic test database; not production",
+  "architectureReview": "changes required; see Fload-Review-Resolution.md R01\u2013R12",
+  "applicationTestsRunForReviewUpdate": false,
+  "finalGreenBranchEstablished": false,
+  "historicalTestClaims": "qualified against retained logs; no result is bound to current source fingerprint",
+  "schemaUnchangedByReviewUpdate": true
 }

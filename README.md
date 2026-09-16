@@ -4,7 +4,11 @@
 
 Updated 16 September 2026 · FLO-1355 · Repository baseline `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc`.
 
-**Documentation is the current deliverable. Implementation is paused and preserved locally.** This packet contains the actual draft schema, the complete delivery plan, focused test evidence and explicit remaining gates. No platform implementation PR or production deployment has been made.
+**Documentation is the current deliverable. Implementation is paused and preserved locally.** This packet contains the actual draft schema, the complete delivery plan, review findings, qualified test evidence and explicit remaining gates. No platform implementation PR or production deployment has been made.
+
+## Independent review update
+
+**Revise the architecture before implementation resumes.** [Review resolution R01–R12](Fload-Review-Resolution.md) records confirmed blockers, corrections, proposed remedies and acceptance proof. [Reviewer relay brief](Fload-Reviewer-Relay.md) is ready to forward to another AI. The actual DDL and catalog remain unchanged; they show the paused draft, not a completed correction.
 
 ## Start here
 
@@ -19,7 +23,7 @@ Updated 16 September 2026 · FLO-1355 · Repository baseline `f0b1af5fc5925d818b
 
 ## Actual proposed schema
 
-**31 physical tables · 497 columns · three relational views · four PostgreSQL schemas.** No JSON/JSONB, arrays or arbitrary property/value columns in the proposed model.
+**Current paused draft: 31 physical tables · 497 columns · three relational views · four PostgreSQL schemas.** This is not a final table-count target. Advisory/request subtype constraints, referent retention, tenant invariants and constraint-preserving consolidation require another design pass. No JSON/JSONB, arrays or arbitrary property/value columns in the proposed model.
 
 The [catalog](current-schema-catalog.json) is exported from the exact repository migrations applied to an isolated synthetic PostgreSQL database. [Validation metadata](repository-validation-result.json) records their SHA-256 hashes. The catalog file uses JSON to distribute schema metadata in the browser; it is not JSON database storage and contains no customer rows.
 
@@ -27,12 +31,12 @@ The SQL bundle contains [0146](0146_durable_actions.sql) and [0147](0147_action_
 
 The six additional tables compared with the earlier 25-table design separate two provider listing contracts, one ASC upload-step contract and three native receipt contracts. Their tradeoffs are explicit. Historical evidence without provable approval still needs a final typed retention representation before old authorities can be removed.
 
-## What changed
+## What changed in this review response
 
-- Replaced the older schema explorer with the actual four-schema migration catalog, including every field, foreign key, enum, check, index, trigger and view.
-- Added visual field cards and complete review, localization, ASO/App Clip, Apple Ads, request/advisory and recovery flows.
-- Completed ownership, queue, entrypoint, migration and cleanup documentation around the paused prototype.
-- Recorded focused test results, known failing HTTP regressions and remaining architecture/implementation gates.
-- Preserved the implementation locally while returning to the requested documentation phase.
+- Added a public disposition of the independent review, R01–R12 acceptance gates and a relay brief for the next AI.
+- Updated all current plans for bounded recovery, same-ticket reopening, lost confirmation, queue promotion, strict subtype constraints, retention/erasure, tenant roles and coordinated cutover.
+- Corrected overstated provider, clock, cursor, attention and CI claims without dismissing the confirmed blockers.
+- Replaced unsupported green-test summaries with qualified retained evidence and reproducibility requirements.
+- Kept the actual 31-table catalog and exact migrations unchanged for honest comparison. No application code, new migration, production action or main refresh was performed for this response.
 
 Earlier source audits remain available as dated evidence. The current documents above supersede their schema proposals. Private customer records and operational census outputs are excluded from this repository.
