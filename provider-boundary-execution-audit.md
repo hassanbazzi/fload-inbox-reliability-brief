@@ -1,3 +1,5 @@
+> Historical source investigation. Retained as dated evidence; use the [current specification](Fload-Inbox-End-to-End-Specification.md), [actual field catalog](Fload-Inbox-Current-Fields.md) and [checkpoint](Fload-Implementation-Checkpoint.md) for the current proposal and its limits.
+
 # Provider boundary: what Fload controls, and what it observes
 
 Investigated 16 September 2026 against remote-main baseline `63275b2f51ac5b5a151a9a6683c813423e682785`. The feature worktree remains on that commit; another local checkout is not the remote baseline. This is a bounded architecture review, not a schema change, implementation, deployment or new provider capability.

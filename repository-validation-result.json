@@ -1,0 +1,22 @@
+{
+  "schemaCompiled": true,
+  "migrationChainApplied": true,
+  "completeImplementation": false,
+  "implementationPaused": true,
+  "productionDeployed": false,
+  "database": "isolated local PostgreSQL test database",
+  "tableCount": 31,
+  "columnCount": 497,
+  "viewCount": 3,
+  "validatedAt": "2026-09-16T16:46:00.647Z",
+  "migrations": {
+    "0146_durable_actions.sql": {
+      "sha256": "8b8561f23ed63d35f7a1bf39e7d36b14b950977758bbc1eae1391f81556ddec9"
+    },
+    "0147_action_progress.sql": {
+      "sha256": "76d2dd3b797257d7d53895a01ac60ee0c07e76578109746550806101aa0d94c2"
+    }
+  },
+  "fullApplicationValidation": "incomplete; known failing HTTP acceptance regression",
+  "scope": "Proposed schema from paused, uncommitted application prototype; exact repository migration chain applied to isolated synthetic test database; not production"
+}

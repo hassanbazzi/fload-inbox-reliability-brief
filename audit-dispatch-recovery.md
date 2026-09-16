@@ -1,3 +1,5 @@
+> Historical source investigation. Retained as dated evidence; use the [current specification](Fload-Inbox-End-to-End-Specification.md), [actual field catalog](Fload-Inbox-Current-Fields.md) and [checkpoint](Fload-Implementation-Checkpoint.md) for the current proposal and its limits.
+
 # FLO-1355 — dispatch, provider steps, recovery, and data readiness
 
 Investigated 15 September 2026 against `fload-ai/fload-platform` commit `63275b2f51ac5b5a151a9a6683c813423e682785`. This is a source and architecture audit, not an implementation or production deployment. The canonical candidate is `schema-core.sql` plus the content, revision, command, and execution guard SQL files. This audit explains their evidence and boundaries; it is not a migration. Existing behavior, proposed decisions, and unverified provider assumptions are distinguished explicitly. No customer content, account IDs, live queue payloads, credentials, or private census records appear here.

@@ -1,3 +1,5 @@
+> Historical source investigation. Retained as dated evidence; use the [current specification](Fload-Inbox-End-to-End-Specification.md), [actual field catalog](Fload-Inbox-Current-Fields.md) and [checkpoint](Fload-Implementation-Checkpoint.md) for the current proposal and its limits.
+
 # Content, provenance, and migration audit
 
 **Source inspected:** `63275b2f51ac5b5a151a9a6683c813423e682785` (latest main pulled 15 September 2026). This is a source investigation, not a production row census. No credentials, provider APIs, application changes, or migrations were accessed or executed in this subtask. A later private aggregate census supplied by the lead agent is addressed at the end. Exact source columns are reproduced below and in `audit-content-source-columns.json`.

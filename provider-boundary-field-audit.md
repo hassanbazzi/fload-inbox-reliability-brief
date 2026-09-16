@@ -1,3 +1,5 @@
+> Historical source investigation. Retained as dated evidence; use the [current specification](Fload-Inbox-End-to-End-Specification.md), [actual field catalog](Fload-Inbox-Current-Fields.md) and [checkpoint](Fload-Implementation-Checkpoint.md) for the current proposal and its limits.
+
 # Provider boundary field audit
 
 **Scope:** read-only follow-up against source commit `63275b2f51ac5b5a151a9a6683c813423e682785` and the published design catalog validated `2026-09-15T19:40:07Z`. The 25-table SQL is the existing design baseline, not implemented application code. This document recommends ownership boundaries; it does not change that SQL, add tables, or publish anything.

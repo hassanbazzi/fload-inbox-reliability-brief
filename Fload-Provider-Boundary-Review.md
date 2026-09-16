@@ -1,14 +1,14 @@
 # Fload-owned workflow and provider-owned semantics
 
-16 September 2026 · FLO-1355 · Source baseline `63275b2f51ac5b5a151a9a6683c813423e682785`
+16 September 2026 · FLO-1355 · Source baseline `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc`
 
-This is an architecture amendment to the inbox design. It recommends how to split responsibilities before implementation. The earlier SQL remains the tested baseline for its existing invariants; its 25 tables / 464 fields are **not a validated implementation of the split proposed here**. No application or database schema has been changed by this review.
+This review now accompanies the actual paused prototype schema: **31 physical tables, 497 fields and three views across four PostgreSQL schemas**. The exact repository migration chain was applied to an isolated synthetic test database and exported into the [field explorer](Fload-Inbox-Current-Fields.md). Application implementation and migration cutover remain incomplete; no production deployment occurred. Earlier 25-table source audits remain dated supporting evidence, not the current schema authority.
 
 ## Recommendation
 
 Keep one PostgreSQL database and one Actions lifecycle. Put provider-specific content, targets and evidence behind explicit integration modules; use PostgreSQL schemas to make their storage ownership visible. Organize by independently changing API/product contracts: `apple_ads`, `app_store_connect`, `google_play`, and, when a real write capability is implemented, `meta_ads`. A single `apple` namespace would put two different products back together.
 
-The same organization belongs in code first. Fload already documents provider-neutral bounded contexts and adapter composition in [Core architecture](https://github.com/fload-ai/fload-platform/blob/63275b2f51ac5b5a151a9a6683c813423e682785/docs/core-architecture.md). Its [Apple architecture tests](https://github.com/fload-ai/fload-platform/blob/63275b2f51ac5b5a151a9a6683c813423e682785/packages/apple/src/architecture.test.ts) already keep product clients independent and exclude Fload infrastructure from those clients. Extend that boundary instead of inventing another execution framework.
+The same organization belongs in code first. Fload already documents provider-neutral bounded contexts and adapter composition in [Core architecture](https://github.com/fload-ai/fload-platform/blob/f0b1af5fc5925d818be7d9b02b42b1fc54556ecc/docs/core-architecture.md). Its [Apple architecture tests](https://github.com/fload-ai/fload-platform/blob/f0b1af5fc5925d818be7d9b02b42b1fc54556ecc/packages/apple/src/architecture.test.ts) already keep product clients independent and exclude Fload infrastructure from those clients. Extend that boundary instead of inventing another execution framework.
 
 ## 1. Draw two lines: authority and contract ownership
 
@@ -27,11 +27,11 @@ For example, `desired_campaign_state = paused`, an HTTP acknowledgement, `observ
 
 A Fload resource guard coordinates Fload's writers, even when several organizations reach the same provider account. It cannot lock the provider's console or another API client. Use native provider preconditions when available; otherwise document and test the remaining external race and reconcile it honestly.
 
-## 2. What should move out of the common Actions tables
+## 2. What the draft moves out of the common Actions tables
 
-The current proposed Ads relation is effectively **Apple Search Ads content**, despite the generic name. Its keyword/ad-group IDs and match types must not become the definition of every provider's Ads model.
+The earlier generic Ads relation was effectively **Apple Search Ads content**. The draft now names it `apple_ads.action_content`. Its keyword/ad-group IDs and match types must not become the definition of every provider's Ads model.
 
-| Current proposed location | Keep with Fload's common workflow | Move to its actual owner |
+| Earlier proposed location | Keep with Fload's common workflow | Move to its actual owner |
 | --- | --- | --- |
 | `action_ad_content` | Revision identity and exact approval reference | Current content becomes Apple Ads-specific change content; reuse genuinely common Ads policies/types separately |
 | `action_listing_content` | Revision envelope and authored provenance | Listings owns proposal text/research; ASC owns App Info/version/App Clip targets; Play owns package/edit/commit semantics |
@@ -79,9 +79,11 @@ Drizzle supports named PostgreSQL schemas through `pgSchema`. The actual migrati
 
 ### Make the physical split deliberate
 
-Moving the existing Apple Ads content relation into its own namespace adds zero tables. Splitting the currently mixed listing targets, App Clip step details and three providers’ attempt receipts could add up to six relations in the audited four-table area. That is a real tradeoff, not a free consequence of namespacing. The next physical-schema pass should extract cohesive contract records where it prevents mixed semantics and future provider-column growth, while retaining genuinely common fields and avoiding a separate table per verb. Do not clone Actions for each provider or adopt a blanket table-count target.
+Moving Apple Ads content into `apple_ads.action_content` adds zero tables. The draft extracts **six** provider-owned extensions: `app_store_connect.listing_contract`, `google_play.listing_contract`, `app_store_connect.step_contract`, and one `attempt_receipt` relation in each of the three current provider schemas. This accounts for the exact 25 → 31 change.
 
-The supporting [field audit](provider-boundary-field-audit.md) classifies every one of the 144 columns in the four mixed relations and presents both the minimal module-boundary change and stronger physical separation. This document recommends the provider-owned contract boundary; exact DDL and the final relation count remain a follow-up design/validation task.
+The split prevents unrelated provider columns from accumulating in common workflow rows and gives each extension native constraints. It costs joins, subtype sealing rules and a larger migration surface. Normalization does not require every one-to-one subtype to be physically separate; a strictly constrained smaller design remains possible. The recommendation is to retain these cohesive provider contract boundaries, then require their cross-schema invariants and migration proof before cutover.
+
+The [actual field catalog](Fload-Inbox-Current-Fields.md) and [SQL](Fload-Inbox-Current-Schema.sql) now show this split concretely. The earlier [144-column ownership audit](provider-boundary-field-audit.md) explains the classification of the mixed design; it is historical evidence and must not be used as the current column count.
 
 ## 4. The typed seam
 
@@ -143,6 +145,6 @@ Review side effects, not function names. A provider helper called “read” can
 - Provider console edits and hidden read-session effects are covered by contract tests.
 - Full migration/seed/cleanup/RLS/restore tests include every introduced schema.
 
-The earlier 60 SQL assertions remain evidence for the earlier concrete design, not proof that this new boundary has been migrated or implemented. Complete the responsibility split and rerun the generated-schema proof before treating a revised physical schema as ready for implementation.
+The exact draft migrations now compile and have been applied in isolated repository test databases; the exported catalog is tied to their hashes. Focused provider, command and storage tests provide partial proof. They do not establish a completed cutover, full repository validation, or production readiness. See the [implementation checkpoint](Fload-Implementation-Checkpoint.md) and [migration plan](Fload-Migration-and-Data-Plan.md) for the remaining gates.
 
 Supporting source and field audits: [field ownership](provider-boundary-field-audit.md), [execution and provider effects](provider-boundary-execution-audit.md).

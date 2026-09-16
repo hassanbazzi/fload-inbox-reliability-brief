@@ -1,3 +1,5 @@
+> Historical source investigation. Retained as dated evidence; use the [current specification](Fload-Inbox-End-to-End-Specification.md), [actual field catalog](Fload-Inbox-Current-Fields.md) and [checkpoint](Fload-Implementation-Checkpoint.md) for the current proposal and its limits.
+
 # FLO-1355 — Complete source-family and entrypoint map
 
 Audited source: `63275b2f51ac5b5a151a9a6683c813423e682785` (latest main pulled into the prescribed feature worktree on 15 September 2026). This is a code investigation and design input, not an implemented system. The private production census captured at 2026-09-15 18:39 UTC was inspected only for aggregate type/status/field presence; no customer IDs, copy, credentials, or raw rows are reproduced here. Aggregate presence is not proof of a race or provider failure.
