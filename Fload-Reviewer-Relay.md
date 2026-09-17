@@ -1,21 +1,13 @@
-# FLO-1355 — review the applied v9 corrections
+# FLO-1355 — review the applied v10 corrections
 
 17 September 2026 · Documentation only · Implementation paused
 
-Read the [simple overview](summary.html), [v8 review disposition](Fload-Inbox-v8-Review-Resolution.md), and [consolidated v9 design](Fload-Inbox-Revised-Design-v9.md). V8 remains available as frozen historical context.
+Read the [visual summary](summary.html), [v9 review disposition](Fload-Inbox-v9-Review-Resolution.md) and [v10 design](Fload-Inbox-Revised-Design-v10.md). V9 is retained as frozen context.
 
-## Copyable review task
+Review H1/M1/M2/L1–L3 against the corrected contracts. Focus on exact Play cleanup and verification-scope reopening, immutable readiness through scheduling, bounded event grants and scope/deduplication, publication-pending handling, due/authority gates, transient versus unsupported evidence, and typed historical command reasons. Check SQL/Core/wire invariants and the six walkthroughs plus new acceptance traces.
 
-Review v9 against the v8 R1–R6 findings. Verify that supported fixes are integrated without contradicting retained constraints. Give remaining defects a severity, exact section/source reference, concrete failing interleaving and smallest coherent correction. Acknowledge resolved findings and separate design contradictions from unimplemented requirements.
+The correction narrows the review's Play-expiry suggestion: that old contract does not prove the later inspection edit was removed. Existing exact cleanup must remain durable and ambiguous cleanup blocks closure. Three fields on the existing command preserve step, subject and the reason known when recovery stopped; later evidence cannot rewrite it. No new table or generic payload is added.
 
-Focus on readback exhaustion and window expiry, global request finality, before_successor versus after_effects, typed publication waiting, binding versus prewrite failure, event deduplication/authority, inspection terminal flags, historical retry_exhausted qualifiers, first-invocation pricing pins, and proven zero-consumption versus unknown cache evidence. Check the six transaction walkthroughs and the strict field matrices against these corrections.
+Acknowledge resolved findings. Give any remaining defect severity, exact section/source, concrete interleaving and smallest correction. Separate implementation requirements from inconsistent design. Review only; do not alter the preserved worktree, migrate, resume implementation, push platform code, write to providers or deploy. The private handover provides exact device/worktree/assessment/manifest/output paths.
 
-The uncertain phase still requires a due time: an exhausted unresolved write uses blocked/uncertain_write with NULL due. No release event bypasses current gates. Failed invocation zeros are supported by definitive non-consumption; completed cache NULLs mean an unreported breakdown with exact cost still required.
-
-Review only. Do not reset/stash/rebase/pull into or alter the preserved worktree, regenerate/run migrations, resume implementation, commit/push platform code, run provider writes or deploy. The separate private handover provides exact design, assessment, worktree, source-manifest and output paths. A clone alone does not contain the preserved uncommitted prototype.
-
-## Evidence and implementation gates
-
-All 215 source-manifest entries and platform HEAD f0b1af5fc5925d818be7d9b02b42b1fc54556ecc were rechecked unchanged. No new application tests were run. Documentation consistency and publication checks do not establish runtime correctness.
-
-The [full specification](Fload-Inbox-End-to-End-Specification.md), [migration plan](Fload-Migration-and-Data-Plan.md), [provider boundary](Fload-Provider-Boundary-Review.md), [entrypoint inventory](Fload-Entrypoint-and-Ownership-Plan.md) and [evidence checkpoint](Fload-Implementation-Checkpoint.md) supply the wider packet. V9 governs changed contracts. The prototype catalog is unchanged; the revised design touches 28 Actions relations, adds two Usage relations and modifies the existing usage log. This pass adds no tables.
+The existing [specification](Fload-Inbox-End-to-End-Specification.md), [migration plan](Fload-Migration-and-Data-Plan.md), [provider boundary](Fload-Provider-Boundary-Review.md), [entrypoint inventory](Fload-Entrypoint-and-Ownership-Plan.md) and [evidence checkpoint](Fload-Implementation-Checkpoint.md) retain the wider scope. V10 governs changed contracts. Prototype source and catalog remain unchanged; no application tests were run. Full migration, provider decoder, transactional settlement, producer/reader/writer cutover and repository checks remain required before an implementation PR.
