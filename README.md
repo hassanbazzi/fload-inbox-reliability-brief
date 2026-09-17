@@ -1,13 +1,13 @@
 # Fload inbox reliability — architecture review packet
 
 
-**Latest: 17 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v11 design](Fload-Inbox-Revised-Design-v11.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v10 review changed](Fload-Inbox-v10-Review-Resolution.md).
+**Latest: 17 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v12 design](Fload-Inbox-Revised-Design-v12.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v11 review changed](Fload-Inbox-v11-Review-Resolution.md).
 
-V11 handles invalidated Play inspection edits, preserves honest evidence when checks become unreadable, lets the same release resume work after an actual reschedule, and specifies safe erasure of cyclic history references. It adds one typed scheduling reference on the existing command, with no new table. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
+V12 closes the lost inspection-cleanup response dead end without pretending the DELETE never happened. It specifies exact successful DELETE responses and an explicit Re-check now limit for repeated readiness of the same release. It adds no stored fields or tables; the v11 scheduling reference remains. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
 
 ---
 
-The following supporting packet and historical schema describe the earlier review checkpoint. V11 takes precedence where it changes a contract.
+The following supporting packet and historical schema describe the earlier review checkpoint. V12 takes precedence where it changes a contract.
 
 [Open the visual artifact](https://hassanbazzi.github.io/fload-inbox-reliability-brief/)
 
