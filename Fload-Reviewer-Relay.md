@@ -1,15 +1,15 @@
-# FLO-1355 — review the applied v12 corrections
+# FLO-1355 — review the applied v13 corrections
 
-17 September 2026 · Documentation only · Implementation paused
+18 September 2026 · Documentation only · Implementation paused
 
-Read the [visual summary](summary.html), [v11 review disposition](Fload-Inbox-v11-Review-Resolution.md) and [v12 design](Fload-Inbox-Revised-Design-v12.md). V11 remains frozen context.
+Read the [visual summary](summary.html), [v12 disposition](Fload-Inbox-v12-Review-Resolution.md) and [v13 design](Fload-Inbox-Revised-Design-v13.md). V12 remains frozen context.
 
-Review M4's corrected recovery path: exact temporary-edit quiescence permits existing matched/TRUE native readback evidence to close the remaining-effect hazard, retaining the original uncertain write. Do not confuse that proof with non-application, a recovered acknowledgement, external handling or listing publication. Check the full exact predicate, closed derived finality classes, both marks matrices, required receipt, SQL/Core/wire consistency, late evidence, all settlement/erasure consumers, and a second ticket acquiring the same app guard.
+Review M5's complete-present cleanup evidence and reserved after-expiry read. Check count reservation, exact receipt anchor, prompt fixed tail interval, bounded grace, late/failed starts, SQL/Core selection and normalization, explicit Reconcile independence and no wall-clock finality or resend.
 
-Review the finite DELETE acknowledgement shapes, 200-empty-object and 204-empty-body, with rejection of arbitrary 2xx/202 and malformed bodies. Exact invalid-edit decoder fixtures remain mandatory.
+Review M6's shared automatic/recheck_required classifier, needs_decision placement, one unread update on exhaustion, historical reason/step/subject snapshots, attention-neutral restoration, repeated cycles, parent/list/count snapshots and personal-read isolation. Scheduling keeps its no-attention promise through a narrowly checked same-transaction normalization; neither adjacent target versions nor timestamps alone prove its cause.
 
-L6 explicitly adopts the review's permitted stricter option: same-version readiness after a closed grant requires bounded Re-check now; no automatic reset of the same immutable grant or uniqueness exception. No stored field, enum value or table is added in v12.
+Review L7's existing writes_closed_at and atomic guard release before user reopen. An unresolved effect or incomplete mutation package still forbids release; late evidence cannot touch a newer ticket's guard generation.
 
-Acknowledge resolved findings. For remaining defects give severity, exact section/source, concrete interleaving and smallest coherent correction. Separate unimplemented proof requirements from contradictory design. Review only; do not change or refresh the preserved platform worktree, migrate, resume implementation, push platform code, write to providers or deploy. The private handover supplies exact device, design, worktree, assessment, manifest and output paths.
+Acknowledge resolved findings. For remaining defects give severity, exact section/source, failing interleaving and smallest coherent correction. Distinguish unimplemented fixture/migration/runtime requirements from design contradictions. No stored field or table is added in this round.
 
-The [specification](Fload-Inbox-End-to-End-Specification.md), [migration plan](Fload-Migration-and-Data-Plan.md), [provider boundary](Fload-Provider-Boundary-Review.md), [entrypoint inventory](Fload-Entrypoint-and-Ownership-Plan.md) and [evidence checkpoint](Fload-Implementation-Checkpoint.md) retain the wider scope. V12 governs changed contracts. No application tests were run. Full migration, native decoder, concurrency/crash, transactional Usage, cutover and repository-required checks remain before implementation can be presented as complete.
+Review only. Do not change or refresh the preserved platform worktree, migrate, resume implementation, push platform code, write to providers or deploy. The private handover provides exact device, design, assessment, worktree, manifest and review-output paths. Native decoder evidence, migration rehearsal, full cutover and repository-required failing→passing tests remain implementation gates.
