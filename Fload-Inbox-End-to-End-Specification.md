@@ -1,5 +1,7 @@
 # Fload inbox reliability — architecture and delivery specification
 
+> **17 September update:** [Corrected design v7](Fload-Inbox-Revised-Design-v7.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v7 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+
 16 September 2026 · FLO-1355 · Source baseline `f0b1af5fc`
 
 **Documentation is the current deliverable. Implementation is paused.** This packet describes the recommended end state, the actual schema now drafted in the repository, evidence from focused tests, and the remaining work required before a clean cutover. It does not claim the overhaul is implemented or ready to ship.

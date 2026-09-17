@@ -1,5 +1,7 @@
 # Implementation checkpoint — paused for documentation
 
+> **17 September update:** [Corrected design v7](Fload-Inbox-Revised-Design-v7.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v7 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+
 16 September 2026 · FLO-1355 · Source baseline `f0b1af5fc`
 
 The requested deliverable is the complete architecture and documentation packet. Implementation started before that intent was clarified. It is now **paused**, with the uncommitted changes preserved on branch `flo-1355-inbox-reliability`. No implementation PR, merge, production migration, deployment or live provider write has been performed.

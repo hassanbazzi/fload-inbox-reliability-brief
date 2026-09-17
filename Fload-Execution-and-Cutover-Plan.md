@@ -1,5 +1,7 @@
 # Execution, providers, generation, and cutover
 
+> **17 September update:** [Corrected design v7](Fload-Inbox-Revised-Design-v7.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v7 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+
 **Documentation status — 16 September 2026.** This is the recommended end state, with an explicit account of the partial implementation used to test the design. Repository baseline: `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc` in `fload-ai/fload-platform`. The prototype is uncommitted, not deployed, and is not a completed platform cutover. Work on that prototype has paused. No live provider writes were used for validation.
 
 **Revised after independent review.** The permanent ticket/revision/approval model remains the recommendation. The paused prototype is not release-ready: recovery has unbounded branches, permanently rejected publication lacks a same-ticket reopening path, and several provider recovery paths are incomplete. The corrections below are proposed design requirements, not newly implemented or tested guarantees. See [Review findings and resolution](Fload-Review-Resolution.md) for the consolidated assessment.

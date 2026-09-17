@@ -1,3 +1,42 @@
+# FLO-1355 — review the applied v7 design fixes
+
+17 September 2026 · Documentation only · Implementation paused
+
+Start with the [simple visual overview](summary.html), then [corrected design v7](Fload-Inbox-Revised-Design-v7.md). V7 directly applies the fixes to v6; review the resulting contracts rather than requesting the same edits again.
+
+## Copyable review task
+
+Review v7 against the preserved prototype and the full supporting packet. Follow all six transaction walkthroughs through the actual required/optional/forbidden field matrices. Check concurrency, crash boundaries, effective receipt/outcome resolution, guard-before-read admission, bounded observation and per-step effect permission after reconciliation. Verify schedule snapshots, command abandonment, zero-write cancellation and the fresh post-reopen baseline. Inspect Usage lock order, immutable consumption and version pairs, serial delta charging and fixed-identifier metering recovery.
+
+Current authorization gates apply to new writes/generation; narrowly scoped read-only recovery of already-issued requests must survive revocation. Diagnostic evidence conflicts permit only explicit bounded readbacks and no automatic clearance. A successful prewrite after reconciliation may authorize a never-attempted step only under its still-current original approval; reconciliation alone never authorizes a resend.
+
+For every remaining finding, provide severity, the exact v7 section and source reference, a concrete failing interleaving, and the smallest coherent correction. Distinguish a documentation inconsistency from an unimplemented requirement. Report acceptance gates honestly; do not claim runtime proofs from transaction prose.
+
+Keep this a design review. Do not resume platform implementation, rewrite migrations, reset or stash the preserved worktree, commit/push application code, run live provider actions or deploy. The local prototype is uncommitted; the requester has a private handover with exact paths and a fingerprint.
+
+## What was fixed
+
+- Resource exclusion begins before prewrite inspection; inspection purpose, grant source and single-use consumption are distinct.
+- Rescheduling preserves approval and records exact before/after dates; reopen demands a fresh attributed baseline.
+- Late evidence resolves its outcome, receipt and generated output together. Manual observations cannot prove native finality.
+- Cancellation obeys immediate guards, partial packages retain evidence, and external console races are stated honestly.
+- Usage stores exact consumption and policy facts with tenant-safe settlement; metering reuses a frozen identifier and payload within a bounded delivery window.
+- Never-sent expired metering is blocked; ambiguous sent metering remains uncertain. Aggregate totals do not justify replay.
+
+## Reading order and status
+
+1. [Corrected v7 field contracts and six traces](Fload-Inbox-Revised-Design-v7.md)
+2. [Full inventory and end-to-end specification](Fload-Inbox-End-to-End-Specification.md)
+3. [Earlier review findings and acceptance gates](Fload-Review-Resolution.md)
+4. [Implementation evidence and limits](Fload-Implementation-Checkpoint.md)
+5. [Preserved prototype field catalog](Fload-Inbox-Current-Fields.md) and [DDL](Fload-Inbox-Current-Schema.sql)
+
+V7 touches 28 Actions relations, adds two Usage relations and modifies the existing usage_credit_log: **31 touched relations, not 31 new tables**. The separate historical prototype catalog contains 31 physical tables / 497 columns; it has not been regenerated as v7 DDL. Platform source checkpoint remains f0b1af5fc5925d818be7d9b02b42b1fc54556ecc plus the preserved prototype. No platform edits or fresh application tests occurred during this documentation correction.
+
+---
+
+## Earlier review relay — historical context
+
 # FLO-1355 — handover for the next architecture review
 
 16 September 2026. Documentation updated after independently checking the external review. Implementation remains paused.

@@ -1,5 +1,7 @@
 # Fload-owned workflow and provider-owned semantics
 
+> **17 September update:** [Corrected design v7](Fload-Inbox-Revised-Design-v7.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v7 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+
 16 September 2026 · FLO-1355 · Source baseline `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc`
 
 This review accompanies the **unchanged, paused draft: 31 physical tables, 497 columns and three views across four PostgreSQL schemas**. The [field explorer](Fload-Inbox-Current-Fields.md) records what the prototype contains, not an approved destination schema. Its migration chain has been applied to isolated synthetic databases, but independent review found correctness gaps that require redesign and fresh validation. Implementation remains paused; no production deployment occurred. Earlier 25-table audits are dated supporting evidence. The [review resolution](Fload-Review-Resolution.md) records the full finding-by-finding disposition.

@@ -1,5 +1,14 @@
 # Fload inbox reliability — architecture review packet
 
+
+**Latest: 17 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v7 design](Fload-Inbox-Revised-Design-v7.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md).
+
+V7 applies the execution, command-history and accounting corrections directly. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
+
+---
+
+The following supporting packet and historical schema describe the earlier review checkpoint. V7 takes precedence where it changes a contract.
+
 [Open the visual artifact](https://hassanbazzi.github.io/fload-inbox-reliability-brief/)
 
 Updated 16 September 2026 · FLO-1355 · Repository baseline `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc`.

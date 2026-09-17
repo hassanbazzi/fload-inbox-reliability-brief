@@ -1,5 +1,7 @@
 # Fload Actions — entrypoint and ownership plan
 
+> **17 September update:** [Corrected design v7](Fload-Inbox-Revised-Design-v7.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v7 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+
 **Target architecture:** one durable Actions domain owns every proposed commitment, revision, decision and execution obligation. UI, APIs, chat, agents and queues enter that domain. The paused prototype has not completed this boundary: legacy writers, routes and direct provider paths still coexist with the new reader.
 
 **Source baseline:** [`f0b1af5fc5925d818be7d9b02b42b1fc54556ecc`](https://github.com/fload-ai/fload-platform/tree/f0b1af5fc5925d818be7d9b02b42b1fc54556ecc). Investigation was refreshed after the earlier audit of `63275b2f5`. The repository also contains an **uncommitted prototype** created during this investigation. Implementation is paused: the current deliverable is the complete architecture artifact. No prototype behavior below should be presented as deployed or as a completed release.
