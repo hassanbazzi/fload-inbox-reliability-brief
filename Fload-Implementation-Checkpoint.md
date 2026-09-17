@@ -1,6 +1,6 @@
 # Implementation checkpoint — paused for documentation
 
-> **17 September update:** [Corrected design v8](Fload-Inbox-Revised-Design-v8.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v8 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+> **17 September update:** [Corrected design v9](Fload-Inbox-Revised-Design-v9.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v9 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
 
 16 September 2026 · FLO-1355 · Source baseline `f0b1af5fc`
 

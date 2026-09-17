@@ -1,13 +1,13 @@
 # Fload inbox reliability — architecture review packet
 
 
-**Latest: 17 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v8 design](Fload-Inbox-Revised-Design-v8.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v7 review changed](Fload-Inbox-v7-Review-Resolution.md).
+**Latest: 17 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v9 design](Fload-Inbox-Revised-Design-v9.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v8 review changed](Fload-Inbox-v8-Review-Resolution.md).
 
-V8 applies the execution, command-history and accounting corrections directly. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
+V9 completes bounded verification, release waiting, inspection evidence and per-attempt pricing rules from the v8 review. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
 
 ---
 
-The following supporting packet and historical schema describe the earlier review checkpoint. V8 takes precedence where it changes a contract.
+The following supporting packet and historical schema describe the earlier review checkpoint. V9 takes precedence where it changes a contract.
 
 [Open the visual artifact](https://hassanbazzi.github.io/fload-inbox-reliability-brief/)
 
