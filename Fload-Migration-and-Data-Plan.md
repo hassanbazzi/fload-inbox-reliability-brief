@@ -1,6 +1,6 @@
 # Fload inbox — clean migration and data plan
 
-> **17 September update:** [Corrected design v10](Fload-Inbox-Revised-Design-v10.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v10 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+> **17 September update:** [Corrected design v11](Fload-Inbox-Revised-Design-v11.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v11 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
 
 **Status: design revision required; implementation remains paused, 16 September 2026.** Source review is grounded in `f0b1af5fc` plus an uncommitted prototype. The current **31-table, 497-column draft is unchanged**, not the approved destination schema. Independent review verified migration, retention, tenant-reference and content-constraint gaps. Nothing described here has been deployed; a passing prototype test does not establish complete cutover readiness. This document contains no customer data or production counts. See the [review resolution](Fload-Review-Resolution.md) for the full disposition and corrections to the external review.
 
