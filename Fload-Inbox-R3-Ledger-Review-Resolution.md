@@ -2,6 +2,8 @@
 
 19 September 2026 · Documentation only · Implementation paused
 
+**Latest follow-up:** [v2 independent review disposition](Fload-Inbox-R3-v2-Review-Resolution.md) records the subsequent fence, missing-card, policy and identity corrections.
+
 The first ledger named **all 212 columns across 12 source tables**. That is useful coverage, but it did not yet prove every fact survives migration. Source review found incorrect inferences, missing nested fields and unresolved destination contracts. Those rules are corrected in [ledger v2](Fload-Inbox-R3-Conservation-Ledger-v2.md); the remaining schema work is explicitly blocked rather than presented as finished.
 
 [Visual walkthrough](ownership-overview.html#conservation-heading) · [Exact source types and writer evidence](Fload-Inbox-R3-Source-Type-Inventory.md) · [All source fields](Fload-Inbox-R3-Source-Fields.md)

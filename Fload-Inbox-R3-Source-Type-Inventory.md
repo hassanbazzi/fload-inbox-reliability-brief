@@ -156,3 +156,69 @@ Unknown historical acknowledgement field strings remain a decoder blocker unless
 
 **Review identity.** The preserved, uncommitted prototype helper `reviewWorkCreationKey` uses `(organizationId, assetId, store, reviewId)` with a versioned digest; it is not present at this main-source pin. Accepted behavior v15 instead identifies reviews by `(organizationId, store, providerAppId, providerReviewId)` (the review identity section). Keep these baselines explicit. An importer should follow the accepted canonical identity and map proven prototype/source aliases to it; silently reinstating the prototype asset-based key would undo that decision. No destination-key implementation or collision proof is supplied by this inventory.
 
+
+---
+
+## 7. Review follow-up: policies, nullability and per-store identity
+
+Read-only verification at `e2cc156994855e401a83399fbb4c3d7be5194875`. Accepted identity authority: revised design v15, line 183. No provider calls, live data, tests, or platform edits. Source behavior establishes possible shapes; it does not establish which historical rows exist.
+
+### F6 — Partial approval policies: confirmed; defaulting needs a conservation rule
+
+The source interface makes all three keys optional. The normalizer keeps each valid key independently and discards invalid values; it does not fill defaults. More decisively, the persistence service stores `input.approvalPolicy ?? {}` directly. A caller-supplied `{ execute: 'await' }` can therefore be persisted without the other keys.
+
+Evidence:
+
+- [Core ApprovalPolicy:110–118](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/packages/core/src/agents/agent-request.ts#L110); [normalizer:428–445](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/packages/core/src/agents/agent-request.ts#L428).
+- [Direct persistence:agent-request.service.ts:234–249](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/agent-request.service.ts#L234).
+- [Caller passes optional policy:listing-change-hypothesis.ts:143–147](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/aso/listing-change-hypothesis.ts#L143).
+
+Defaults are actual behavior, not only comments: [requiresApprovalToEnter:380–389](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/packages/core/src/agents/agent-request.ts#L380) treats missing hypothesize as automatic, and missing draft/execute as requiring approval.
+
+**Smallest correction:** explicitly block partial objects from the new all-present/all-absent active tuple until their typed historical representation is approved. Preserve their exact known source keys and values as non-authorizing evidence through the component conservation gate. Do not silently run the forgiving normalizer on source JSON: discarded invalid keys/values are unhandled source facts.
+
+If default expansion is selected instead, retain original key presence per stage separately from the derived complete policy. A single `policy_defaults_applied` boolean cannot reconstruct whether an explicit `await` was supplied for draft, execute, both, or neither. In either approach, old policy settings are not a historical grant or permission to execute new work.
+
+### F7 — Nullable finalization blocker: confirmed
+
+The proposed `blocker_code enum NN` contradicts both the type and runtime reader:
+
+- [UnblockFinalizationState:66–75](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/agent-request-unblock.service.ts#L66) requires the property but allows `string | null`.
+- [Reader:493–500](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/agent-request-unblock.service.ts#L493) explicitly accepts null and returns it unchanged. A missing property is rejected by this reader; missing and explicit null are not interchangeable.
+- [Resolution input:267](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/agent-request-unblock.service.ts#L267) falls back to the request's nullable blocker. [Marker construction:345–350](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/agent-request-unblock.service.ts#L345) preserves that value.
+
+**Smallest correction:** declare the historical field nullable, preserve explicit null, and keep nonnull unknown strings at the existing closed-decoder gate until their vocabulary is evidenced. Do not invent an “unknown” enum member or replace null with the current request blocker. This confirms a representational requirement; no claim is made that null markers exist in production.
+
+### F9 — Per-store review identity: confirmed; Android appId is demonstrably mixed
+
+Accepted v15:183 uses `(organization_id, store, provider_app_id, provider_review_id)`, independent of asset aliases. It does not by itself define which Play app identifier occupies `provider_app_id`. Pin the following store-specific rule before B9 is closed:
+
+| Store | Proposed canonical provider_app_id | Source provider_review_id | Identity aliases that must remain distinct |
+|---|---|---|---|
+| ios | Apple Adam app ID as text | Exact source `review.id`, populated by String(fetchedReview.id) | Asset ID, connector/account ID, and official ASC customerReviews resource ID are separate facts |
+| android | Android package name as text, preserving its source spelling | Exact fetched Play review ID stored in `review.id` | Console numeric app ID and asset ID require explicit bridges; neither is the package itself |
+
+The **Play package choice is a precise proposed completion of B9**, consistent with existing reply targeting; it must not be described as already stated explicitly by v15. Do not alternate between numeric ID and package name in the permanent key.
+
+#### Actual write paths
+
+**iOS:** [ios-reviews.ts:182–205](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/executors/reviews/ios-reviews.ts#L182) stores the fetched review ID and resolved `reviewAppId`; [293–296](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/executors/reviews/ios-reviews.ts#L293) inserts that object. [resolveIOSReviewAppId:731–764](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/executors/reviews/ios-reviews.ts#L731) supplies asset/linked/provided/metadata candidates to [the selector:53–67](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/reviews/ios-app-id-resolver.ts#L53), which accepts a trimmed 5–15-digit Adam-ID candidate. This is executable selection logic, not merely a schema comment. Conflicting retained candidates still need migration adjudication; the runtime's first-match precedence is not historical proof.
+
+**Android worker:** [android-reviews.ts:103–120](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/executors/reviews/android-reviews.ts#L103) takes `appId` from the job and branches on whether it is numeric. [460–473](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/executors/reviews/android-reviews.ts#L460) stores that **same input unchanged** alongside `fetchedReview.id`. No assignment normalizes the stored app ID to a package in that path.
+
+**Scheduler:** [review-sync-scheduler.service.ts:275–315](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/review-sync-scheduler.service.ts#L275) selects `asset_data_source.appId` and copies it into the Android review job. It does not enforce a numeric-only source constraint.
+
+**Alternative sync:** [review-sync.service.ts:1737–1749](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/review-sync.service.ts#L1737) chooses the linked Google Play data source's `appId`; [852–855](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/review-sync.service.ts#L852) stores it. Its “numeric” comment does not add validation.
+
+#### Evidence for the numeric-ID/package bridge
+
+[google-play-acceptance.ts:390–434](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/google-play-acceptance.ts#L390) searches a provider apps response by exact package name, then replaces a data source's missing/package-like appId with the matched `numericAppId`. Search package comes from data-source packageName/bundleId metadata, the previous appId, or the associated asset bundleId. This proves why both source shapes can exist and where a paired identity can originate; it does not prove that a particular historical pair survives.
+
+The send path selects `target.packageName` for Android: [send-replies-enqueue.ts:76–102](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/reviews/send-replies-enqueue.ts#L76). [gplay-sync-targets.ts:42–72](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/aso/gplay-sync-targets.ts#L42) reads linked app ID, package metadata and asset googleAppId, scoped to the organization; [127–134](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/aso/gplay-sync-targets.ts#L127) retains both `packageName` and `consoleAppId`. [gplay-package-name.ts:25–46](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/aso/gplay-package-name.ts#L25) returns the first package-shaped candidate, preserving case; it cannot algorithmically derive a package from a numeric ID.
+
+**Smallest migration rule:** freeze the exact retained asset/data-source/provider identity evidence with the source component. A direct package-shaped review appId may supply its package candidate; a numeric review appId requires a matching same-tenant Google Play identity bridge that resolves to one consistent package. Assert the review's source asset/organization and store independently. Conflicting, missing, or merely guessed bridges remain B9-blocked, with source IDs and links preserved. Never resolve by current title, first connector, asset ID alone, or by casting the numeric ID into the package slot. Connector readiness or credentials are not required to conserve proven historical identity and do not confer execution authority.
+
+A current readback predicate is insufficient as the bridge: [reply-readback-targets.ts:55–62](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/reviews/reply-readback-targets.ts#L55) compares `review.appId` only with asset appleAppId/googleAppId, which can miss the numeric Play rows above. Do not turn that failed join into “review absent” or create a second ticket.
+
+Finally, preserve Apple's optional `appleReviewResourceId` separately. [reply-helpers.ts:482–519](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/helpers/reply-helpers.ts#L482) resolves/caches an official API resource ID against the existing review. Do not switch the permanent review key to that value whenever it becomes known; new API-only producers require an explicit equivalent-identity rule before materialization.
+

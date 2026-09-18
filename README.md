@@ -1,5 +1,12 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: R3 ledger v2 review follow-up · 19 September 2026.** [Review disposition](Fload-Inbox-R3-v2-Review-Resolution.md) · [Current ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Visual walkthrough](ownership-overview.html#conservation-heading) · [Source types and identity evidence](Fload-Inbox-R3-Source-Type-Inventory.md).
+
+The independent review confirms the eight main corrections. Explicit review-sync fencing, missing-card holds, pin mismatch handling, partial policy blocking and per-store identity rules are now included. Correlation-based transaction proof and historical manual-authorship reopening were not adopted. Next: concrete destination contracts for B9–B13; no final schema/table count or runtime proof is claimed. Implementation remains paused.
+
+---
+
+
 **Latest: R3 conservation ledger corrected · 19 September 2026.** [Visual walkthrough](ownership-overview.html#conservation-heading) · [Corrected 212-column ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Actual source types](Fload-Inbox-R3-Source-Type-Inventory.md) · [What changed and what remains](Fload-Inbox-R3-Ledger-Review-Resolution.md).
 
 All 212 source column names are covered; exact destination schemas and migration proof remain open. Evidence, actors, retry, aliases, personal notes, localization facts, suppression and domain-retirement rules have been corrected. No final table count is approved. Ownership v6 remains accepted; platform implementation is paused.
