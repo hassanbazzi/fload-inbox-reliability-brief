@@ -1,6 +1,6 @@
 # Fload Actions — entrypoint and ownership plan
 
-> **18 September update:** [Corrected design v13](Fload-Inbox-Revised-Design-v13.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v13 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+> **18 September update:** [Corrected design v14](Fload-Inbox-Revised-Design-v14.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v14 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
 
 **Target architecture:** one durable Actions domain owns every proposed commitment, revision, decision and execution obligation. UI, APIs, chat, agents and queues enter that domain. The paused prototype has not completed this boundary: legacy writers, routes and direct provider paths still coexist with the new reader.
 

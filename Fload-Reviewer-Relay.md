@@ -1,15 +1,11 @@
-# FLO-1355 — review the applied v13 corrections
+# FLO-1355 — reviewer relay
 
-18 September 2026 · Documentation only · Implementation paused
+18 September 2026 · Latest design: v14 · Implementation paused
 
-Read the [visual summary](summary.html), [v12 disposition](Fload-Inbox-v12-Review-Resolution.md) and [v13 design](Fload-Inbox-Revised-Design-v13.md). V12 remains frozen context.
+Review the [consolidated v14 design](Fload-Inbox-Revised-Design-v14.md) alongside the [v13 review disposition](Fload-Inbox-v13-Review-Resolution.md). Start with the [simple visual summary](summary.html) for the product walkthrough. The earlier prototype field explorer is preserved evidence, not v14 DDL.
 
-Review M5's complete-present cleanup evidence and reserved after-expiry read. Check count reservation, exact receipt anchor, prompt fixed tail interval, bounded grace, late/failed starts, SQL/Core selection and normalization, explicit Reconcile independence and no wall-clock finality or resend.
+Focus on M7's two-branch cleanup-read budget and exact equality/backoff, then L8's truthful Scheduled presentation, state-only date wake, attention history, parked-Reconcile refusal, parent/list/count consistency and read-state races. Check all governing matrices and normalizer restatements together. The conservative actor watermark policy remains.
 
-Review M6's shared automatic/recheck_required classifier, needs_decision placement, one unread update on exhaustion, historical reason/step/subject snapshots, attention-neutral restoration, repeated cycles, parent/list/count snapshots and personal-read isolation. Scheduling keeps its no-attention promise through a narrowly checked same-transaction normalization; neither adjacent target versions nor timestamps alone prove its cause.
+Acknowledge resolved findings. For each defect supply severity, exact section/source, a failing sequence and the smallest coherent correction. Distinguish design defects from implementation proof still required: native fixtures, transaction guards, SQL/Core parity, migrations, producer cutover and runtime tests.
 
-Review L7's existing writes_closed_at and atomic guard release before user reopen. An unresolved effect or incomplete mutation package still forbids release; late evidence cannot touch a newer ticket's guard generation.
-
-Acknowledge resolved findings. For remaining defects give severity, exact section/source, failing interleaving and smallest coherent correction. Distinguish unimplemented fixture/migration/runtime requirements from design contradictions. No stored field or table is added in this round.
-
-Review only. Do not change or refresh the preserved platform worktree, migrate, resume implementation, push platform code, write to providers or deploy. The private handover provides exact device, design, assessment, worktree, manifest and review-output paths. Native decoder evidence, migration rehearsal, full cutover and repository-required failing→passing tests remain implementation gates.
+Review only. Platform implementation is paused; no production deployment is authorized. The private handover supplied separately contains device, worktree, branch, HEAD, exact design/assessment paths, source manifest and review output location. This public relay intentionally contains no private filesystem paths.
