@@ -1,9 +1,9 @@
 # Fload inbox reliability — architecture review packet
 
 
-**Latest: ownership draft v5 · 18 September 2026.** [Open the new visual comparison](https://hassanbazzi.github.io/fload-inbox-reliability-brief/ownership-overview.html): original inbox or v15 → new ownership design, clickable module map, selected concrete fields and three lifecycle walkthroughs. [Detailed v5 proposal](Fload-Inbox-Ownership-Design-v5.md) · [Review corrections and remaining work](Fload-Inbox-Ownership-v4-Review-Resolution.md).
+**Latest: ownership draft v6 · 18 September 2026.** [Open the new visual comparison](https://hassanbazzi.github.io/fload-inbox-reliability-brief/ownership-overview.html): original inbox or v15 → new ownership design, clickable module map, selected concrete fields and three lifecycle walkthroughs. [Detailed v6 proposal](Fload-Inbox-Ownership-Design-v6.md) · [Review corrections and remaining work](Fload-Inbox-Ownership-v5-Review-Resolution.md).
 
-Actions owns workflow; domains own content; providers own native contracts; Usage owns settlement. V5 preserves the accepted v4 corrections and clarifies the exact worker routing predicate and release offers before the first cycle. Recovery uses the current obligation, so unrelated unsupported steps cannot block safe readback. No tables, columns or enum values are added. **Implementation is paused. R2/R3, complete consolidated DDL and runtime/migration proof remain open.** The older explorer is preserved for comparison; it is not the new schema.
+Actions owns workflow; domains own content; providers own native contracts; Usage owns settlement. V6 preserves the accepted v5 routing and early-offer rules, makes the NULL-route scan branch explicit, and fixes later expansion to the original plan’s operation versions. A newer worker cannot silently upgrade an approved plan; ordinary supported recovery stays independent of whole-plan support. No tables, columns or enum values are added. **Implementation is paused. R2/R3, complete consolidated DDL and runtime/migration proof remain open.** The older explorer is preserved for comparison; it is not the new schema.
 
 ---
 
