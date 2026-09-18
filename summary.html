@@ -14,7 +14,7 @@
 <body>
 <a class="skip" href="#main">Skip to overview</a>
 <header>
-  <div class="mast"><span class="eyebrow">Start here · design proposal</span><nav aria-label="Artifact navigation"><a href="index.html">Detailed artifact ↗</a><a href="https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-Revised-Design-v14.md">Full v14 design ↗</a></nav></div>
+  <div class="mast"><span class="eyebrow">Start here · design proposal</span><nav aria-label="Artifact navigation"><a href="index.html">Detailed artifact ↗</a><a href="https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-Revised-Design-v15.md">Full v15 design ↗</a></nav></div>
   <h1>One ticket.<br><span>From idea to evidence.</span></h1>
   <p class="lead">Give every piece of work a permanent home: what changed, who approved it, what was sent, and what actually happened.</p>
   <div class="status"><strong>Design review · implementation paused</strong><span>The partial prototype is preserved. This page explains the proposed end state; it is not a release or a production deployment.</span></div>
@@ -33,7 +33,7 @@
       <article class="node"><span class="label">action_read</span><h3>What you have seen</h3><p>Personal read state. Reading a ticket cannot approve, dismiss or reopen it.</p><div class="fields">user_id · action_id<br>seen_attention_version</div></article>
     </div>
   </div>
-  <p class="caption">A simplified map of the proposed model, with selected fields and relationships. The v14 document defines the revised contracts; the detailed explorer retains the earlier prototype fields for comparison.</p>
+  <p class="caption">A simplified map of the proposed model, with selected fields and relationships. The v15 document defines the revised contracts; the detailed explorer retains the earlier prototype fields for comparison.</p>
   <div class="subline"><strong>Strict, typed fields · immutable revisions · explicit relationships</strong><span>Approvals never silently move to new content.</span></div>
 </section>
 <section class="section" aria-labelledby="flow-title">
@@ -70,9 +70,9 @@
   <div class="scope"><div class="scope-number"><strong>31</strong><div><span>relations touched</span><small>Across the revised design. This is not a count of new tables.</small></div></div><div class="scope-copy"><p><strong>The number includes existing and proposed relations.</strong> Actions keeps shared workflow facts; typed content and provider records keep their own facts. Existing queues remain the transport.</p><p>Current scope covers store listings and localizations, review replies and batches, the seven supported Apple Search Ads operations, agent/generation requests and advisories. It does not add hypothetical provider capabilities.</p><p><strong>Clean migration is required.</strong> Preserve existing identities, receipts and links through explicit mappings, then remove the replaced workflow paths. No permanent parallel legacy system.</p></div></div>
   <div class="gates"><div class="gate"><b>01 · Review the contracts</b><span>Resolve command, provider, authorization and data-model rules before implementation resumes.</span></div><div class="gate"><b>02 · Prove the migration and failures</b><span>Exercise representative data, stale approvals, races, retries, crashes and batch handoffs.</span></div><div class="gate"><b>03 · Complete the cutover</b><span>Converge every reader and writer, pass repository checks and prepare a reviewable PR. No production deployment is authorized here.</span></div></div>
   <div class="note"><strong>Current status:</strong> documentation review with a paused, incomplete prototype. Historical scoped checks do not establish a current full green build. Migration and end-to-end acceptance remain required work.</div>
-  <div class="note"><strong>What v14 changes:</strong> Keep the full cleanup retry allowance when a temporary edit has already expired; one transient error must not end recovery. Future release work says Waiting until its date, without asking for an early recheck. At that date, run eligible checks or show Needs decision once. No new stored fields or tables. <a href="https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-v13-Review-Resolution.md">Read the review corrections →</a></div>
-  <div class="execution-line" aria-label="Scheduled work becomes due without inventing recovery capacity"><strong>Scheduled · wait until date</strong><span>→</span><strong>Date arrives</strong><span>→</span><strong>Automatic checks · or Re-check now</strong></div>
-  <div class="bottom-links"><a class="button-link primary" href="index.html">Explore the detailed artifact →</a><a class="button-link" href="https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-Revised-Design-v14.md">Read the full v14 design →</a></div>
+  <div class="note"><strong>What v15 changes:</strong> Give the final cleanup check a fixed grace period even when the edit expires just before the ordinary recovery deadline. Earlier checks keep their attempt limit and backoff; unused slots cannot turn into extra retries. Scheduled work and unread history remain as reviewed. No new stored fields or tables. <a href="https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-v14-Review-Resolution.md">Read the review corrections →</a></div>
+  <div class="execution-line" aria-label="One protected final check within the existing recovery budget"><strong>Up to 5 ordinary checks</strong><span>→</span><strong>1 protected check</strong><span>→</span><strong>Provider evidence required</strong></div>
+  <div class="bottom-links"><a class="button-link primary" href="index.html">Explore the detailed artifact →</a><a class="button-link" href="https://github.com/hassanbazzi/fload-inbox-reliability-brief/blob/main/Fload-Inbox-Revised-Design-v15.md">Read the full v15 design →</a></div>
 </section>
 </main>
 <footer><span>Fload · FLO-1355 · Design proposal</span><span>Conceptual overview · detailed contracts govern implementation</span></footer>

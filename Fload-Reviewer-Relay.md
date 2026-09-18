@@ -1,11 +1,11 @@
 # FLO-1355 — reviewer relay
 
-18 September 2026 · Latest design: v14 · Implementation paused
+18 September 2026 · Latest design: v15 · Implementation paused
 
-Review the [consolidated v14 design](Fload-Inbox-Revised-Design-v14.md) alongside the [v13 review disposition](Fload-Inbox-v13-Review-Resolution.md). Start with the [simple visual summary](summary.html) for the product walkthrough. The earlier prototype field explorer is preserved evidence, not v14 DDL.
+Review the [v15 design](Fload-Inbox-Revised-Design-v15.md) with the [v14 review disposition](Fload-Inbox-v14-Review-Resolution.md). The [simple visual summary](summary.html) gives the product walkthrough. The earlier prototype explorer remains preserved evidence, not v15 DDL.
 
-Focus on M7's two-branch cleanup-read budget and exact equality/backoff, then L8's truthful Scheduled presentation, state-only date wake, attention history, parked-Reconcile refusal, parent/list/count consistency and read-state races. Check all governing matrices and normalizer restatements together. The conservative actor watermark policy remains.
+The remaining L9 correction unifies cleanup recovery into up to N−1 ordinary starts before D and one protected start before H=max(D,R+G). Check protected consumption after fewer ordinary starts, exact boundary/backoff rules, immediate exhaustion, late evidence, independent grants and all normalizer/acceptance restatements together. M7 retries and L8 Scheduled presentation remain accepted; no new schema relation or field is introduced.
 
-Acknowledge resolved findings. For each defect supply severity, exact section/source, a failing sequence and the smallest coherent correction. Distinguish design defects from implementation proof still required: native fixtures, transaction guards, SQL/Core parity, migrations, producer cutover and runtime tests.
+Acknowledge resolved findings. Give severity, exact references, a failing sequence and the smallest coherent correction for any remaining defect. Separate design defects from I1–I6 implementation proof: transaction guards, SQL/Core parity, native fixtures, worker wake handling, migrations, producer cutover and runtime tests. Arithmetic checks are documentation validation only.
 
-Review only. Platform implementation is paused; no production deployment is authorized. The private handover supplied separately contains device, worktree, branch, HEAD, exact design/assessment paths, source manifest and review output location. This public relay intentionally contains no private filesystem paths.
+Review only. Platform implementation is paused and production deployment is not authorized. The separately supplied private handover contains the device, worktree, branch, HEAD, exact design/assessment locations, source manifest and review output path.

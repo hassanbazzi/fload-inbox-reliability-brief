@@ -1,13 +1,13 @@
 # Fload inbox reliability — architecture review packet
 
 
-**Latest: 18 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v14 design](Fload-Inbox-Revised-Design-v14.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v13 review changed](Fload-Inbox-v13-Review-Resolution.md).
+**Latest: 18 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v15 design](Fload-Inbox-Revised-Design-v15.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v14 review changed](Fload-Inbox-v14-Review-Resolution.md).
 
-V14 preserves the ordinary cleanup retry budget when the edit has already expired, and uses a bounded later read only when expiry reaches beyond that window. Future release waits show Scheduled until their date, then real automatic checks or visible Re-check now. No stored fields or tables are added; the waiting display remains a closed typed projection. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
+V15 gives the final protected cleanup read one fixed grace rule on either side of the ordinary deadline. Up to five ordinary starts plus one protected start preserve the same six-start budget; unused ordinary slots never become extra protected retries. The accepted Scheduled presentation and history rules remain. No stored fields, enum values or tables are added. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
 
 ---
 
-The following supporting packet and historical schema describe the earlier review checkpoint. V14 takes precedence where it changes a contract.
+The following supporting packet and historical schema describe the earlier review checkpoint. V15 takes precedence where it changes a contract.
 
 [Open the visual artifact](https://hassanbazzi.github.io/fload-inbox-reliability-brief/)
 

@@ -1,6 +1,6 @@
 # Execution, providers, generation, and cutover
 
-> **18 September update:** [Corrected design v14](Fload-Inbox-Revised-Design-v14.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v14 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+> **18 September update:** [Corrected design v15](Fload-Inbox-Revised-Design-v15.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v15 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
 
 **Documentation status — 16 September 2026.** This is the recommended end state, with an explicit account of the partial implementation used to test the design. Repository baseline: `f0b1af5fc5925d818be7d9b02b42b1fc54556ecc` in `fload-ai/fload-platform`. The prototype is uncommitted, not deployed, and is not a completed platform cutover. Work on that prototype has paused. No live provider writes were used for validation.
 

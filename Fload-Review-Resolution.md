@@ -1,8 +1,8 @@
 # FLO-1355 — independent review response and next design gates
 
-**Latest review:** [V13 findings assessed and addressed in v14](Fload-Inbox-v13-Review-Resolution.md). The older R01–R12 findings below remain implementation acceptance gates.
+**Latest review:** [V14 finding assessed and addressed in v15](Fload-Inbox-v14-Review-Resolution.md). The older R01–R12 findings below remain implementation acceptance gates.
 
-> **18 September update:** [Corrected design v14](Fload-Inbox-Revised-Design-v14.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v14 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
+> **18 September update:** [Corrected design v15](Fload-Inbox-Revised-Design-v15.md) now defines the reviewed execution, command-history and Usage contracts. Start with the [simple visual summary](summary.html). This supporting document preserves the wider inventory and earlier review evidence; v15 takes precedence where its contracts change these proposals. Implementation and migration validation remain open.
 
 16 September 2026 · Review of baseline `f0b1af5fc` plus the paused local prototype.
 
