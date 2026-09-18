@@ -1,7 +1,13 @@
 # Fload inbox reliability — architecture review packet
 
 
-**Latest: 18 September 2026.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v15 design](Fload-Inbox-Revised-Design-v15.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v14 review changed](Fload-Inbox-v14-Review-Resolution.md).
+**Latest: ownership draft v4 · 18 September 2026.** [Open the new visual comparison](https://hassanbazzi.github.io/fload-inbox-reliability-brief/ownership-overview.html): original inbox or v15 → new ownership design, clickable module map, selected concrete fields and three lifecycle walkthroughs. [Detailed v4 proposal](Fload-Inbox-Ownership-Design-v4.md) · [Review corrections and remaining work](Fload-Inbox-Ownership-v3-Review-Resolution.md).
+
+Actions owns workflow; domains own content; providers own native contracts; Usage owns settlement. V4 corrects first-inspection budget timing and mixed-worker dispatch, specifies targetless recovery history and removes a redundant receipt-policy selector. **Implementation is paused. R2/R3, complete consolidated DDL and runtime/migration proof remain open.** The older explorer is preserved for comparison; it is not the new schema.
+
+---
+
+**Earlier v15 checkpoint.** [Open the simple visual summary](https://hassanbazzi.github.io/fload-inbox-reliability-brief/summary.html) for a team walkthrough, or [read the corrected v15 design](Fload-Inbox-Revised-Design-v15.md) for exact field contracts and transaction rules. [Reviewer handover](Fload-Reviewer-Relay.md) · [What the v14 review changed](Fload-Inbox-v14-Review-Resolution.md).
 
 V15 gives the final protected cleanup read one fixed grace rule on either side of the ordinary deadline. Up to five ordinary starts plus one protected start preserve the same six-start budget; unused ordinary slots never become extra protected retries. The accepted Scheduled presentation and history rules remain. No stored fields, enum values or tables are added. Its revised scope is **28 Actions relations + two new Usage relations + one modified existing Usage relation = 31 touched relations**, not 31 newly added tables. The field explorer preserves the earlier prototype; application implementation remains paused.
 
