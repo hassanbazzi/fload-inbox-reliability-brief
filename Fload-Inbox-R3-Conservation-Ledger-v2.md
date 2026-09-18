@@ -1,0 +1,499 @@
+# FLO-1355 — R3 conservation ledger v2
+
+19 September 2026 · Corrected after source review · Documentation only · Implementation paused
+
+**What this is.** A column-complete **mapping proposal**, corrected against the current writer census and accepted ownership/R2–R3 rules. All 212 declared source columns are named. This is not yet a value-complete typed destination schema: known nested-field, identity, command-attribution and historical-state gaps are explicitly blocked below. The proposed history relation count is not accepted by this ledger.
+
+**Source contract appendix:** [Exact localization, verification, handoff and provider field types](Fload-Inbox-R3-Source-Type-Inventory.md).
+
+**What changed in v2.** Removed inferred approval/execution authorship; separated original hash validation from new revision digests; preserved all legacy batch links and unread notes; made blocked preflight retryable; required complete graph/dependency revalidation; preserved rejection suppression across fingerprint versions; corrected domain erasure and retirement consumers. Provider-native history belongs in provider schemas. Exact destination DDL and data rehearsal remain open. [Concise review resolution](Fload-Inbox-R3-Ledger-Review-Resolution.md).
+
+**Source basis.** The supplied ledger’s writer census and the verified column/type inventory are pinned to `origin/main` pin `e2cc156994855e401a83399fbb4c3d7be5194875` with exact-ref `git show`/`git grep`; the preserved prototype at `f0b1af5fc` (unchanged: 145 entries, 212 hashes, 3 recorded deletions) supplied the importer contracts it already encodes. The locally inspected origin/main ref is `94685451b`; the earlier comparison found no changes under packages/database or the inbox wire contract relative to the census pin. This is not a claim to have fetched the latest remote main or reviewed every later writer change. **No production rows were read.** Every "never written", "always NULL" or "no producer" statement below is a statement about code at the pin, not about data; the rehearsal census must confirm each against real rows.
+
+**Writer drift since the prototype baseline** (merge-base 16 September). Table definitions changed for one of the twelve sources (`opportunity_backlog`, `impact`/`risk`), but twelve payload-writer files changed: `aso-agent.ts`, `locale-expansion.ts`, `backlog.service.ts`, `backlog/reconcile.ts`, `backlog/stage-refusal.ts`, `inbox-iteration.service.ts`, `inbox.service.ts`, `pending-action.service.ts`, `process-aso-locale-expansion.ts`, `shared-types/aso/decisions.ts` (+536), `shared-types/contracts/backlog.ts` (+268), `shared-types/inbox.ts` (+74). Decoders are therefore pinned to writers at `e2cc15699`, not to the baseline.
+
+---
+
+## 0. Notation
+
+| Code | Disposition |
+|---|---|
+| **P** | Proposed destination or link. Source-column coverage is verified; destination DDL, nested-value conservation and runtime proof are not implied. A named B gate overrides P. |
+| **D** | Domain ownership retained. Its facts remain domain-owned; normalization, legacy JSONB removal and removal of parallel workflow authority still require a tested domain migration. |
+| **R** | Retirement candidate only after a versioned deterministic reconstruction from immutable retained inputs is byte-equal to the source, or an explicit reviewed retirement disposition exists. Generated prose is not automatically redundant. Failure preserves typed facts or blocks. |
+| **B** | Unresolved blocker. Rows carrying the value cannot be imported until the named decision or decoder exists; the source row is retained meanwhile. |
+
+Conversions: `utc(x)` = `x AT TIME ZONE 'UTC'` only for a row/field with established UTC wall-time provenance (§7); otherwise `time_provenance_unknown` blocks conversion; `ms(x)` = `to_timestamp(x / 1000.0)`; `iso(x)` = ISO-8601 string with offset. "opaque" = text retained verbatim, no FK, referent owned by another domain (v15 §Links: `source_present_at_insert`). Every `history` relation carries `organization_id` with composite FKs; it is omitted from the column lists below.
+
+---
+
+## 1. Scope decision per source
+
+| Source | Columns | Class | Why |
+|---|---|---|---|
+| `pending_action` | 33 | migrate, then retire as authority | Old workflow authority; every fact has a destination in Actions or `history`. |
+| `agent_request` | 30 | migrate, then retire | Same. |
+| `agent_request_event` | 8 | migrate, then retire | Lifecycle history of the above. |
+| `review_draft_reply` | 17 | migrate, then retire | Mutable delivery state; the reply content becomes an immutable revision. |
+| `review_draft_rejection` | 11 | migrate, then retire | Suppression identity and the only surviving copy of a deleted draft. |
+| `inbox_item_state` | 10 | migrate, then retire | Personal read state plus overlays needing shared resolution. |
+| `opportunity_backlog` | 42 | migrate live rows; retire as writer | Backlog rows become scheduled tickets (v15 import branch). |
+| `inbox_recovery_run` | 6 | **blocker** | No writer, no reader, no type at the pin (§11 B1). |
+| `review_history` | 13 | **D** | Review-domain source facts (`schema.ts:1357`); the migration plan retains "review source facts" by domain. Neither tenant nor asset is derivable from the row, which is a second reason not to copy it (§11 B2). |
+| `aso_recommendation` | 14 | **D** | ASO domain object; Actions links through `action_revision_source(kind='recommendation')`. |
+| `aso_recommendation_variant` | 13 | **D** | Same, `kind='recommendation_variant'`. |
+| `capability_execution` | 15 | **D** | Existing best-effort execution/calibration log with mutable verification fields (`execution-log.ts:30–49,145–162`). Preserve its domain-owned facts and IDs; do not duplicate the same records in `imported_execution_claim`. Missing rows prove nothing about effects. Report joins and strict domain schemas remain contract gates (§12). |
+
+157 columns have proposed migration/retirement/blocker dispositions (P/R/B); 55 retain domain ownership (D). Total 212. This is a source-column coverage count, not 212 proven conversions.
+
+---
+
+## 2. Relationships that decide import units
+
+An atomic import unit contains the explicitly classified same-organization source relationships below. Only proved same-work equivalence classes collapse to one ticket; parent/child, lineage, evidence and personal edges never establish identity equality. Shared asset/user/domain references are dependencies, not a reason to merge all their tickets into one component. Enumerate the exact connected source edge set, incoming and outgoing, under the cutover freeze (§9.2).
+
+| # | Edge | Source anchor | Class | Destination |
+|---|---|---|---|---|
+| E1 | `opportunity_backlog.staged_pending_action_id → pending_action.id` | `backlog.service.ts:1103–1146` writes both in one transaction | **same work** | one ticket; aliases `backlog_item` and `pending_action`; schedule provenance from the backlog row |
+| E2 | many backlog rows → one `review_catch_up_30d` card | `backlog.service.ts:2065–2089` | same work (n:1) | one ticket; one `backlog_item` alias per row |
+| E3 | stage-refusal card ↔ backlog row | `stage-refusal.ts:545–558` (`params.stageBlocker.backlogItemId`) | same work | one ticket; alias `stage_blocker_card`; blocker as dependency/advisory |
+| E4 | `agent_request.pendingActionId` and `recommendationIds[]` (pending-action IDs) | `schema.ts:4913`, `aso-agent.ts:1187`, `locale-hypothesis.ts:220` | relationship requires semantic classification | Preserve every source edge. A request-to-package handoff retains its parent identity; generated reply/locale work becomes children. A raw FK alone proves neither a second parent nor a separate piece of work. Exact per-kind classification is B9. |
+| E5 | `post_batch.params.draftIds[]` and `draftDigests[]` | `inbox.ts:1172`, `reply-text-digest.ts:96` | preserved manifest; separate decision-time proof | Preserve ordered members and original `sha256:<64hex>` digests. Equality to current draft bytes proves this manifest content only. Historical approval membership is known only when original decision evidence binds this exact manifest and child content; otherwise explicitly unproved. |
+| E6 | reply draft ↔ `post_reply` for the same provider review | legacy params plus preserved prototype helper | same work only after identity reconciliation | Accepted review identity includes organization, store, provider app and provider review. The prototype asset-based helper is evidence, not a reason to change that contract. Resolve asset aliases to exact provider identity and consolidate overlapping sources; ambiguity is B9. |
+| E7 | `pending_action.supersededByPendingActionId` | `schema.ts:4723` | lineage | `action.successor_action_id`; old ticket decision `superseded` |
+| E8 | `opportunity_backlog.supersedes_backlog_item_id` | `schema.ts:6560` | lineage | `history.backlog_item_facts.predecessor_record_id` |
+| E9 | `agent_request_event.agentRequestId` | `schema.ts:4959` | history of parent | `history.source_record.parent_record_id` |
+| E10 | `inbox_item_state.(source_type, source_id)` → target | `inbox.service.ts:668–681, 844, 1404` | personal | `action_read` or `history.overlay_claim.target_*` |
+| E11 | `capability_execution.pending_action_id`, `.work_id` (`review-reply:<reviewId>`, registered ids, `queue-job:*`, `agent-run:*`) | census §5 | evidence (D) | resolve at read time via `action_alias(pending_action)` and the review creation key; never copied |
+| E12 | `pending_action.experimentId`, `agent_request.experimentId`, `params.experimentId` → `aso_experiment` | `schema.ts:4740`, `:4921` | domain reference | `action_revision_source(kind='experiment')` + facts column; referent retained |
+| E13 | `review_draft_rejection.source_draft_id → deleted review_draft_reply` | writer deletes the draft (`reject-review-draft-batch.ts:163`) | snapshot after deletion | the rejection source record is present; its separately typed draft reference is absent. Do not falsify the rejection record’s own presence flag. Snapshot fields are the only surviving draft copy |
+| E14 | `agent_request.supersededByAgentRequestId` | never populated (`inbox-housekeeping.service.ts:157`, `collapse-no-open-release-duplicates.ts:156`) | lineage | `successor_action_id` if ever non-NULL; census expects zero |
+
+Consolidation rule: within a component, distinct source records keep distinct `history.source_record` rows; same-work edges select exactly one canonical creation key (review key for review work; the pending action's key otherwise); conflicting bytes, targets or membership across a same-work edge block the whole component (`duplicate_executable_work`), never two executable tickets.
+
+---
+
+## 3. Destination relations
+
+### 3.1 Existing relations this ledger writes into
+
+`actions.action`, `action_revision` (+ `review_work.reply_content`, `listing_work.listing_content`, `listing_work.content_term`, `ads_work.ads_content`, `agent_work.request`, `agent_work.advisory`, `agent_work.request_country`, `agent_work.request_competitor`, `agent_work.content_note`), `action_alias`, `action_revision_source`, `action_membership`, `action_dependency`, `action_read`, `action_command`/`action_command_target` (migration channel only: `create`, `reject`, `supersede`, `schedule`, `archive`), provider target leaves (`app_store_connect.listing_target`, `google_play.listing_target`, `apple_search_ads.target`, `app_store_connect.review_target`). No `action_approval`, `action_execution`, `action_execution_attempt` or `usage.*` row is ever authored by import.
+
+**Destination gaps, not silently accepted Core additions:** a non-executable historical-work presentation (D2), a single owner for current impact/risk assessment (D3), original suppression claims distinct from new source-comparison fingerprints (D4/D5), and missing closed nested shapes (B6/B10). `historical_incomplete` remains confined to the shapes already permitted by v15; it does not permit an incomplete executable proposal. No new decision value is accepted here.
+
+### 3.2 New `history` relations
+
+These are candidate relations, not executable DDL. Their determinant alone does not justify a physical table. §12 specifies the ownership/consolidation review still required. History facts are non-authorizing, immutable except explicit erasure/personal-resolution transitions, and tenant-qualified. Authority-owned dispositions and read projections use the canonical command path. B10 blocks every shorthand type, unnamed column, missing variant matrix or provider field in a shared relation; no permissive fallback is allowed.
+
+| Relation | Columns (SQL type · null · closed values) | Key / determinant | Notes |
+|---|---|---|---|
+| `history.import_component` | `id` text PK · `component_key` char(64) NN · `member_count` integer NN CHECK >0 · `component_fingerprint` char(64) NN · `fingerprint_version` integer NN CHECK=1 · `importer_version` integer NN CHECK >0 · `import_command_id` text NULL FK `action_command` · `imported_at` timestamptz NN | UNIQUE (organization_id, component_key); source membership also globally unique per tenant/source key | **Successful imports only.** No blocked row and no mutable retry lifecycle. B11 must define attribution for history-only imports before this nullable anchor is allowed; an ordinary command cannot stand for the whole transaction. Fingerprints and command replay rules are in §9.2. |
+| `history.source_record` | `id` text PK (= `migrationCreationKey(org,'history:'+kind,id)`) · `asset_id` text NULL FK asset · `scope` enum {`asset`,`organization`} · `component_id` text NN FK · `source_kind` enum {`pending_action`,`agent_request`,`agent_request_event`,`review_draft_reply`,`review_draft_rejection`,`inbox_item_state`,`opportunity_backlog`} · `source_id` text NN · `parent_record_id` text NULL FK self · `source_fingerprint` char(64) NN · `fingerprint_version` int NN CHECK=1 · `disposition` enum {`imported_as_work`,`consolidated_into_work`,`declined_history`,`terminal_history`,`evidence_only`,`personal_state`} · `action_id` text NULL FK action · `link_state` enum {`linked`,`no_work`,`target_missing`,`ambiguous`} CHECK (`linked` ⇔ `action_id` NN) · `source_present_at_import` bool NN · `source_created_at` timestamptz NULL · `source_updated_at` timestamptz NULL · `imported_at` timestamptz NN | UNIQUE (org, `source_kind`, `source_id`) | One row per migrated source row. `scope='asset'` iff `asset_id` NN. `source_present_at_import` describes this exact source record, never its missing referent. |
+| `history.decision_claim` | `id` PK · `record_id` NN FK · `ordinal` smallint NN · `decision_kind` enum {`created`,`approved`,`rejected`,`deleted`,`superseded`,`blocked`,`retried`,`executed`,`completed`,`failed`,`expired`,`staged`,`archived`,`dismissed`,`snoozed`,`iterating`,`stage_refused`} · `actor_user_id` text NULL FK user · `actor_state` enum {`known`,`unavailable`,`system`,`agent`} CHECK (`known` ⇔ `actor_user_id` NN; `system`/`agent` ⇒ NULL) · `actor_agent_run_id` text NULL opaque · `occurred_at` timestamptz NULL · `reason_code` enum NULL (§3.3) · `reason_text` text NULL · `content_proof` enum {`proved`,`unproved`,`not_applicable`} · `proved_revision_id` text NULL FK `action_revision` CHECK (`proved` ⇔ NN) · `membership_proof` same enum · `proved_parent_revision_id` text NULL FK CHECK likewise | UNIQUE (`record_id`, `ordinal`) | Every historical actor/time/reason fact from every source. Never sets `current_approval_id`; never creates a command. |
+| `history.delivery_claim` | `record_id` PK FK · `queued_for_send_at` timestamptz NULL · `queue_marker_kind` enum NN {`queued`,`lease`,`unknown`} (positive writer evidence required) · `sent_at` timestamptz NULL · `sent_at_origin` enum {`fload_send`,`provider_modified_mirror`,`unknown`} · `send_attempts` int NN CHECK≥0 · `legacy_failure_sentinel` bool NN · `last_send_error` text NULL · `readback_booked_at` timestamptz NULL · `executed_at` timestamptz NULL · `completed_at` timestamptz NULL · `failure_reason` text NULL · `result_run_id` text NULL opaque · `check_back_at` timestamptz NULL · `check_back_run_id` text NULL opaque · `check_back_action` text NULL · `check_back_days_elapsed` int NULL CHECK≥0 · `executed_action_key` enum NULL (§4.1 action set) · `executed_locale` text NULL · `after_state_updated_at` timestamptz NULL | 1:1 with a work record | Send/execution lifecycle hints. Any non-NULL send or execution hint makes the component `requires_recovery` before executable import. |
+| `history.generation_claim` | `record_id` PK FK · `model` text NULL · `prompt_tokens` int NULL · `completion_tokens` int NULL · `total_tokens` int NULL · `draft_created_at` timestamptz NULL · `draft_updated_at` timestamptz NULL | 1:1 | Generation telemetry; never a Usage charge. |
+| `history.native_receipt_claim` | `id` PK · `record_id` NN FK · `ordinal` smallint NN · `provider` enum {`app_store_connect`,`google_play`,`apple_search_ads`} · `definition_key` enum (18 `WORK_DEFINITION_KEYS` + `pause_campaign`,`resume_campaign`,`adjust_budget`) · `evidence_key` enum {`asc_listing_mutations_acknowledged`,`asc_promo_text_mutation_acknowledged`,`asc_locale_mutation_acknowledged`,`google_play_locale_updated`,`google_play_listing_updated`,`asa_mutation_acknowledged`} · `content_digest` text NN | UNIQUE (`record_id`,`ordinal`) | Neutral head of one acknowledged native mutation; native fields live in the provider leaf below. Excluded from every finality/effect selector. |
+| `app_store_connect.historical_mutation` | `claim_id` PK FK · `action_key` enum {`apply_listing_changes`,`update_promo_text`,`create_locale`} · `locale` text NN · `version_id` text NN · `transport` enum {`asc_api`,`asc_web`,`asc_api_and_web`} ; child `historical_mutation_field(claim_id, ordinal, field_name enum {description,keywords,name,promotionalText,subtitle,supportUrl,whatsNew})` | 1:1 with claim | From `ASOListingMutationAcknowledgement` (`shared-types/aso/experiments.ts:87`). This is the canonical acknowledgement-builder field set, distinct from the general ASO apply union. The exported source fields type is string[]; other historical names block until an evidenced decoder exists. Digest binds locale/version/content, not account/app/organization/action/transport; retain separate identity proof. |
+| `google_play.historical_mutation` | `claim_id` PK FK · `action_key` enum {`create_locale`,`update_description`,`update_short_description`} · `locale` text NN · `package_name` text NN · `edit_id` text NN ; child field rows enum {title,description,shortDescription} | 1:1 | From `GooglePlayListingMutationAcknowledgement` (`:98`). |
+| `apple_search_ads.historical_mutation` | `claim_id` PK FK · `action_key` enum = `ASA_WORK_ACTIONS` (7) · `campaign_id` text NN · `ad_group_id` text NULL · `target_id` text NULL · `transport` enum {`asa_api`} ; child field rows enum = `ASA_MUTATION_FIELDS` {bidAmount,currencyCode,dailyBudgetAmount,matchType,status,text} | 1:1 | From `AsaMutationAcknowledgement` (`asa-work-actions.ts:234`). |
+| `history.handoff_claim` | `id` PK · `record_id` NN FK · `ordinal` · `handoff_kind` enum {`reply_queued`,`replies_queued`,`aso_experiment_reverted`,`catch_up_queued`,`review_analysis_saved`,`provider_request_only`} · `draft_source_id` text NULL · `review_id` text NULL · `asset_id` text NULL · `connector_id` text NULL opaque · `experiment_id` text NULL opaque · `analysis_id` text NULL opaque · `apply_job_id` text NULL · `days` int NULL · `agent_mode` enum NULL {`manual`,`full_agentic`} · `reviews_analyzed` int NULL · `provider_request_id` text NULL · `content_digest` text NULL ; child `handoff_claim_member(claim_id, ordinal, member_kind enum {queued_draft,unclaimable_draft,applied_locale,skipped_locale}, member_value text NN, unclaimable_reason enum NULL {already_sending,already_sent,delivery_budget_spent,no_longer_open})` | UNIQUE (`record_id`,`ordinal`); per-kind required/forbidden CHECK | Internal hand-off acknowledgements from `execution-receipt.ts:60–100`; not provider receipts, not finality. |
+| `history.execution_receipt` | `record_id` PK FK · `definition_key` enum · `performed` bool NN ; child `execution_receipt_resource(record_id, ordinal, resource_id text NN)` | 1:1 | Head of `afterState.workExecutionReceipt`; its `evidence` fans out to the two claim relations above. |
+| `provider-owned expected-prior facts (B10)` | `id` PK · `record_id` NN FK · `locale` text NULL · `field_name` enum (ASC ∪ Play field names) · `value_state` enum {`present`,`empty`} · `value` text NULL CHECK (`present` ⇔ NN) | UNIQUE (`record_id`,`locale`,`field_name`) | Rejected as a common ASC/Play field bag. Preserve each provider’s named before-fields and explicit absent/null/empty/value state in its typed history leaf. Never a fresh baseline. B10 includes concrete leaf fields and uniqueness; nullable locale must not weaken uniqueness. |
+| `history.pending_action_facts` | `record_id` PK FK · `action_key` enum (§4.1) · `agent_type` enum {`review`,`aso`,`platform`,`orchestrator`} · `mode` enum {`draft`,`agent`} · `priority` enum {`high`,`medium`,`low`} · `status_at_import` enum (9, `pending-action.ts:2–12`) · `orchestrator_run_id` text NN opaque · `source_agent_run_id` text NULL opaque · `source_recommendation_index` int NULL · `experiment_id` text NULL opaque · `experiment_present_at_import` bool NULL · `experiment_parent_id` text NULL opaque · `experiment_cycle_number` int NULL · `successor_source_id` text NULL · `revert_severity` enum NULL {`moderate`,`severe`} · `revert_origin` enum NULL {`regression`,`user_request`} · `regression_summary` text NULL · `connector_type` text NULL (closed connector kind) · `unanswered_count_at_creation` int NULL CHECK≥0 | 1:1 | Scalar lifecycle facts with no meaning outside this source kind. |
+| `history.pending_action_state` | `record_id` PK FK · `before_action_key` enum NULL · `before_locale` text NULL · `before_captured_at` timestamptz NULL · `before_review_rating` smallint NULL · `before_response_present` bool NULL · `blocked_reason_code` enum NULL (`InboxReasonCode`, 9) · `blocked_owner_code` enum NULL {`you`,`us`} · `blocked_message` text NULL · `blocked_at` timestamptz NULL · `guide_title`/`guide_what_happened`/`guide_why_it_matters`/`guide_next`/`guide_cta_label`/`guide_cta_href` text NULL · `pin_content_fingerprint` text NULL · `pin_scope_asset_id` text NULL · `pin_scope_action` enum NULL · `pin_release_policy` enum NULL {`next_eligible`} · `pinned_at` timestamptz NULL · `terminal_noop_code` enum NULL {`ASO_LOCALE_ALREADY_SATISFIED`,`ASO_EXPERIMENT_ALREADY_REVERTED`,`REVIEW_REPLY_NO_LONGER_SENDABLE`} · `terminal_noop_message` text NULL · `mismatch_capability_key` text NULL · `mismatch_execution_id` text NULL opaque · `mismatch_detected_at` timestamptz NULL · `housekeeping_superseded_at` timestamptz NULL · `housekeeping_reason` text NULL · `housekeeping_max_age_days` int NULL · `housekeeping_issue` enum NULL {`FLO-1296`} · `repair_issue` enum NULL {`FLO-822`} · `repair_at` timestamptz NULL · `repair_outcome` enum NULL {`archived`,`normalized`} · `repair_prior_status` enum NULL · `repair_reason` text NULL · `repair_normalized_store` bool NULL · `gen_superseded_backlog_source_id` text NULL · `gen_superseded_locale` text NULL · `gen_superseded_by_user_id` text NULL FK user · `gen_superseded_at` timestamptz NULL · `dispatch_child_run_status` enum NULL {`completed`,`failed`} · `dispatch_reviewed_at` timestamptz NULL · `catch_up_recorded_at` timestamptz NULL ; child `pending_action_state_item(record_id, item_kind enum {guide_step,pin_locale,failed_locale,published_reply,regression}, ordinal, text_value text NULL, draft_source_id text NULL, review_id text NULL, text_digest text NULL, metric enum NULL, regression_scope enum NULL {aggregate,locale}, before_value numeric NULL, after_value numeric NULL, relative_change numeric NULL, severity enum NULL, reason text NULL)` | 1:1 | Proposed source facts only; not yet exhaustive. ASC release resolution fields move to an ASC-owned history leaf; shared state retains a typed reference. `afterState.autoApplied` must be preserved as its own nullable boolean claim, not inferred from mode/status. Source and after-state experiment references remain separately conserved if both exist. All group-presence matrices and actual provider-leaf fields are B10. |
+| `history.agent_request_facts` | `record_id` PK FK · `kind` enum (6) · `phase` enum (5) · `status_at_import` enum (7) · `agent_type` enum · `blocker_code` enum NULL {`NO_OPEN_RELEASE`,`NO_WRITABLE_CONNECTOR`,`METADATA_LIMIT`,`legacy_lifecycle_unsupported`,`agent_unavailable`,`stage_dispatch_failed`} · `idempotency_key` text NN · `scenario_id` text NULL opaque · `experiment_id` text NULL opaque · `source_agent_run_id` text NULL opaque · `pending_action_source_id` text NULL · `hypothesis_origin` enum NULL {`scheduled_agent`,`user_directed_chat_or_mcp`} · `plan_id` text NULL opaque · `wave_index` int NULL CHECK≥0 · `demand_lookback_days` int NULL CHECK>0 · `recommendation_type` enum NULL · `blocked_platform` text NULL · `blocked_locale` text NULL · `blocked_field` text NULL ; child `agent_request_supporting_evidence(record_id, ordinal, text NN)` ; child `agent_request_finding(record_id, ordinal, finding_id text NN)` | 1:1 | Request-level scalars and the `evidence` header. Per-locale evidence goes to child request tickets (§4.2). |
+| `app_store_connect.historical_unblock_finalization` | `record_id` PK FK · `blocker_code` enum NN · `status` enum {`pending`,`finalized`} · `attempts` int NULL · `last_attempt_at`/`next_attempt_at`/`completed_at` timestamptz NULL · `last_error` text NULL · `verification_source` enum NULL {`live_asc_release_state`} · `verification_outcome` enum NULL {`editable`,`not_editable`,`uncertain`} · `verification_reason` enum NULL {`missing_asset`,`missing_connector`,`cached_fallback`,`empty_response`,`timeout`,`live_error`} · `verification_error` text NULL · `transport` enum NULL {`api`,`scraper`} · `fetched_at` timestamptz NULL · `sync_attempted` bool NULL · `sync_error` text NULL · `editable_version` text NULL ; child `unblock_finalization_target(record_id, ordinal, target_source_id text NN, target_action_id text NULL FK)` | 1:1 with a request record | From `blockerContext.unblockFinalization` (`:345–350`, `:550–556`). The outer source also has resolved/message and open data; B10 requires all actual nested writer variants and resolved/message fields. Enums alone do not close that shape. Finalization blockerCode is nullable in source and must not be narrowed to NN without proof. |
+| `history.event_detail` | `record_id` PK FK (event record) · `detail_kind` enum {`request_state`,`unblock_verification`,`unblock_retry`,`dispatch_failure`,`legacy_repair`,`housekeeping`,`dedupe_collapse`,`draft_output`} · `kind`/`phase`/`status` enums NULL · `blocker_code` enum NULL · a typed reference to the ASC-owned historical verification leaf (B10); no native verification columns here · `original_blocker_code` enum NULL · `queued_run_id` text NULL opaque · `dependents_reset`/`approved_tickets_resumed`/`stage_blockers_restaged` int NULL · `cascade_repair` bool NULL · `reason_code` enum NULL · `detail_text` text NULL · `repair_issue` enum NULL · `normalized`/`reopened` bool NULL · `cutoff` timestamptz NULL · `age_days`/`max_age_days` int NULL · `survivor_source_id` text NULL ; child `event_detail_target(record_id, ordinal, target_source_id text NN, target_action_id text NULL FK)` | 1:1 with an event record | Every `agent_request_event.data` variant per `eventType` (census §2). Per-kind required/forbidden CHECK. |
+| `history.backlog_item_facts` | `record_id` PK FK · `status_at_import` enum {`proposed`,`staged`,`archived`} · `source` enum {`report`,`agent`,`chat`,`manual`} · `candidate_source_kind` enum NULL (6) · `candidate_key` text NULL · `content_hash` text NULL · `work_definition_key` enum NULL (`WorkDefinitionKeySchema`, incl. 3 legacy ads keys) · `work_execution_mode` enum NULL {`execute`,`draft_handoff`,`advisory`} · `capability_tier` smallint NULL CHECK 1..3 · `staged_intent_identity` text NULL CHECK regex `^[a-z0-9.-]+-[a-z0-9.-]+-[0-9a-f]{12}$` · `rejected_intent_identity` text NULL same CHECK · `stage_attempted_at` timestamptz NULL · `stage_refusal_reason` text NULL · `retirement_reason_code` enum NULL {`absent_from_latest_report`,`production_reset`,`resolved_by_listing_change`,`staged_superseded`,`staged_revised`,`replaced_row`} · `retirement_reason_text` text NULL · `schedule_month` smallint NULL CHECK 1..3 · `available_at` timestamptz NULL · `source_report_id`/`source_report_version_id`/`latest_seen_report_version_id` text NULL opaque · `predecessor_record_id` text NULL FK `source_record` · `staged_pending_action_source_id` text NULL · `market_text` text NULL · `gate_text` text NULL · `impact` enum NULL {`high`,`medium`,`low`} · `risk` enum NULL {`low`,`medium`,`high`} ; child `backlog_evidence_ref(record_id, ordinal, kind enum {truth_slot,data_path}, ref text NN, label text NULL)` ; child `backlog_preflight_blocker(record_id, ordinal, code enum {MISSING_CAPABILITY,DEPENDENCY_BLOCKED,INSUFFICIENT_EVIDENCE}, key text NN, owner enum {fload,client})` · `preflight_ok` bool NULL · `preview_title`/`preview_summary`/`preview_fload_will` text NULL · `preview_client_will` text NULL | 1:1 | Backlog scalars, `evidence_refs`, `work_preflight_receipt`, `work_preview`. |
+| `history.overlay_claim` | `id` PK · `record_id` NN FK · `user_id` text NN FK user ON DELETE CASCADE · `source_type` enum {`agent_request`,`pending_action`,`pending_action_batch`,`review_draft_batch`,`agent_activity`,`review_draft`} · `target_source_id` text NN · `target_action_id` text NULL FK action · `overlay_status` enum {`read`,`unread`,`snoozed`,`dismissed`,`archived`,`iterating`} · `snoozed_until` timestamptz NULL · `note` text NULL · `resolution` enum {`personal_only`,`pending_review`,`shared_command`,`dropped_reviewed`} · `resolution_command_id` text NULL FK `action_command` · `source_updated_at` timestamptz NN | UNIQUE (`record_id`) | Preserve one personal source snapshot for every old row, including read/unread with notes, snooze values and missing target. Read/unread uses personal_only and never a shared command. Other overlays require explicit reviewed resolution; no automatic dropped_reviewed. Only resolution fields are mutable through that path. Deleted with user. |
+| `history.stage_intent` | `record_id` PK FK · `field` enum {`title`,`subtitle`,`keywords`,`promotional_text`} · `locale` text NN ; child `stage_intent_term(record_id, ordinal, direction enum {add,remove}, term text NN)` | 1:1 with a stage-refusal card record | From `params.stageBlocker.intent` (`stage-refusal.ts:545–558`). `termContext` requires exact typed meaning/context fields even when no proposal exists; the listed term/direction columns do not cover it. B10 until that leaf is specified. |
+
+### 3.3 `history_reason_code` (closed)
+
+`NO_OPEN_RELEASE`, `NO_WRITABLE_CONNECTOR`, `METADATA_LIMIT`, `legacy_lifecycle_unsupported`, `agent_unavailable`, `stage_dispatch_failed` (request blocker codes) · `permission_denied`, `consent_draft_only`, `locale_missing`, `needs_build`, `apply_failed`, `qc_failed`, `expired_unapproved`, `superseded`, `billing_required` (`InboxReasonCodeSchema`, `inbox.ts:129–152`) · `MISSING_CAPABILITY`, `DEPENDENCY_BLOCKED`, `INSUFFICIENT_EVIDENCE` (preflight) · `absent_from_latest_report`, `production_reset`, `resolved_by_listing_change`, `staged_superseded`, `staged_revised`, `replaced_row` (retirement). Free-text reasons go to `reason_text` with `reason_code` NULL; a code outside this set is a per-row `unmapped_content` blocker.
+
+---
+
+## 4. Per-source ledgers
+
+### 4.1 `pending_action` (33 columns; `schema.ts:4677–4768`)
+
+Writers: 27 real insert sites (census; two were missing from the handover list: `store-app-access-inbox.service.ts:210`, `review-catch-up-inbox.service.ts:169`; `stage-agent-pending-actions.ts:85` has no callers; `orchestrator-agent.ts:1711` is behind a compile-time `false`). Closed `action_key` set at the pin: `agent_attention_needed`, `apply_listing_changes`, `aso_review_needed`, `wake_agent`, `propose_experiment`, `flag_issue`, `escalate`, `update_promo_text`, `update_description`, `update_short_description`, `post_batch`, `post_reply`, `revert_experiment`, `aso_revert_listing`, `create_locale`, `onboarding_audit_recommendation`, `backlog_opportunity`, `connect_source`, `store_app_access_lost`, `review_catch_up_30d`, `generate_review_analysis`, the seven `asa_*`. Two writers accept an unbounded `action` (`recommendations.ts:232`, `inbox-iteration.service.ts:992/2427`); any value outside this set is a per-row `unmapped_content` blocker.
+
+| Column | Type · null | Disp. | Destination and rule |
+|---|---|---|---|
+| `id` | text NN PK | P | `action_alias(namespace='pending_action', old_id=id, action_id, historical_membership_known per E5)`; `source_record.source_id`. Ticket id = `materializedActionId(org, key)` with key = `reviewWorkCreationKey` for review work, else `migrationCreationKey(org,'pending_action',id)` unless E1–E3 select another canonical key. |
+| `organizationId` | text NN FK | P | `source_record.organization_id`, `action.organization_id`. |
+| `orchestratorRunId` | text NN FK agent_run | P | `pending_action_facts.orchestrator_run_id` opaque (synthetic `blkrun_*`, chat runs kept verbatim). |
+| `assetId` | text NULL FK | P | `source_record.asset_id`, `action.asset_id`; NULL only for `connect_source`, `agent_attention_needed`, `backlog_opportunity` org rows → `scope='organization'`. |
+| `agentType` | text NN | P | `facts.agent_type` enum; `agent-attention.ts:81` passes a free string → outside {review, aso, platform, orchestrator} blocks. |
+| `action` | text NN | P | `facts.action_key` enum; decoder selector. |
+| `params` | jsonb NN | P/B | Per `action_key`, table below. |
+| `reason` | text NN | P | `action_revision.rationale` of the proposal revision. |
+| `priority` | text NN dflt medium | P | `action.priority` smallint (high→1, medium→2, low→3); `facts.priority`. |
+| `mode` | text NN | P | `facts.mode` {draft, agent}. |
+| `status` | text NN dflt pending_approval | P | `facts.status_at_import` (9 values incl. `blocked`); selects the disposition row in §9.1. |
+| `approvedBy` / `approvedAt` | text NULL FK user / timestamp NULL | P | `decision_claim(approved, actor, utc(approvedAt))`; Validate the original pin using the pinned legacy `stableStringify(mutationParams(params))` algorithm; independently check asset/action/locales/release policy, then prove the typed revision transformation. Never compare that hash directly with the new canonical digest. `membership_proof` requires E5 decision-time linkage, not matching current bytes. **No current approval is created** (§10 D1). |
+| `rejectedBy` / `rejectedAt` / `rejectedReason` | NULL | P | `decision_claim(rejected, actor, utc(rejectedAt), reason_text)`; ticket `decision='declined'` through a migration-channel `reject` command whose actor is the importer. |
+| `deletedAt` / `deletedBy` | timestamptz NULL / text NULL FK | P | `decision_claim(deleted, actor, deletedAt)`; ticket `decision='cancelled'`, `archived_at=deletedAt`; alias still resolves (FLO-830 tombstone). |
+| `failureReason` | text NULL | P | `delivery_claim.failure_reason`. |
+| `supersededByPendingActionId` | text NULL | P | `action.successor_action_id` via alias; `facts.successor_source_id`; ticket `decision='superseded'`. Unresolvable target → `link_state='target_missing'`. |
+| `sourceAgentRunId` | text NULL | P | `action_revision_source(kind='agent_run', source_agent_run_id, source_present_at_insert)`; `facts.source_agent_run_id`. |
+| `sourceRecommendationIndex` | int NULL | P | `facts.source_recommendation_index`. |
+| `executedAt` | timestamp NULL | P | `delivery_claim.executed_at = utc()`. |
+| `resultRunId` | text NULL FK agent_run | P | `delivery_claim.result_run_id` opaque. |
+| `completedAt` | timestamp NULL | P | `delivery_claim.completed_at = utc()` subject to §7. |
+| `beforeState` | jsonb NULL | P | Two writer shapes only: `{action, locale, capturedAt}` (`aso-agent.ts:1671`) → `state.before_action_key/before_locale/before_captured_at=iso()`; `{reviewId, rating, hadResponse}` or `{}` (`review-agent.ts:553`) → `before_review_rating`, `before_response_present` (`reviewId` R: equals the ticket's review identity). Any other key blocks. |
+| `afterState` | jsonb NULL | P | Sub-objects, each 1:1 (census §3): `inboxBlocked` → `state.blocked_*` + `guide_step` items; `approvalPin` → `state.pin_*` + `pin_locale` items; `releaseWaitResolved` → ASC-owned historical release-resolution leaf (B10); `workExecutionTerminalNoop` → `state.terminal_noop_*`; `appliedVerificationMismatch` → `state.mismatch_*`; `inboxHousekeeping` → `state.housekeeping_*`; `legacyRepair` → `state.repair_*`; `supersededByGenerationRequest` → `state.gen_superseded_*`; `dispatchReview` → `state.dispatch_*`; `reviewCatchUpPublishedReplies` → `state.catch_up_recorded_at` + `published_reply` items; `experimentId` → separately preserved after-state experiment reference; `autoApplied` → nullable boolean claim with source presence (B10), never reconstructed from mode/status; `action`/`locale`/`updatedAt` → `delivery_claim.executed_action_key/executed_locale/after_state_updated_at`; `workExecutionParams` → a separately tagged historical content snapshot when different; the source claims it was used, but status does not prove it was executed or approved. Its closed revision-purpose/source attribution is B10; no current proposal/baseline shortcut; `workExecutionReceipt` → `execution_receipt` + `native_receipt_claim` + `handoff_claim`. Unknown key blocks. |
+| `experimentId` | text NULL FK aso_experiment | P | `facts.experiment_id` opaque + `experiment_present_at_import`; `action_revision_source(kind='experiment')`. |
+| `checkBackAt` | timestamp NULL | P | `delivery_claim.check_back_at = utc()`. |
+| `checkBackRunId` | text NULL FK agent_run | P | `delivery_claim.check_back_run_id` opaque. |
+| `checkBackResult` | jsonb NULL | P | Single writer shape `{checkBackAction, daysElapsed}` (`orchestrator-agent.ts:1914`) → `delivery_claim.check_back_action/check_back_days_elapsed`. |
+| `createdAt` / `updatedAt` | timestamp NN | P | `source_record.source_created_at/updated_at = utc()`. `action.created_at` is the import instant (v15 permits `scheduled_for` < `created_at`). |
+
+**`params` decoders by `action_key`** (source shapes per census §2):
+
+| `action_key` | Destination content | Nested facts |
+|---|---|---|
+| `post_reply` (registry) | `review_work.reply_content(purpose='proposal', intent = mode 'update'→`update` else `reply`, reply_text=replyText)`; review snapshot columns from the `review` row at import; ticket key E6 | — |
+| `post_batch` | collection parent; `action_membership` per `draftIds[i]` → review child by that draft's `review_id`; `draftDigests[]` → preserved manifest content; separate approval-time proof (E5); `assetId` → `action.asset_id` | digests are `sha256:<64hex>` of reply text (`reply-text-digest.ts:96`) |
+| `apply_listing_changes` (registry and hand-built at `aso-agent.ts:5766`, `aso-action-tools.ts:1542`) | one child `listing_work.listing_content(proposal, store, locale, intent='update')` per `locales[locale]`; `after` fields → present values; `termsAdded/termsRemoved/termContext` → `listing_work.content_term`; `recommendationIds[]` → `action_revision_source(kind='recommendation')`; `scope`, `recommendationType`, `riskLevel` → **B10** (the accepted collection subtype has no named facts columns for them; no invented generic bag) | `before` → provider-owned typed historical before-fields (B10); `parentId`, `cycleNumber` → `facts.experiment_parent_id/experiment_cycle_number`; `variantId` → `revision_source(kind='recommendation_variant')` |
+| `update_promo_text` / `update_description` / `update_short_description` | `listing_content(proposal)` with the one field present; `packageName` → `google_play.listing_target.package_name`; `fieldLabel` → retain exact typed label snapshot or B10; R only with exact versioned reconstruction | `before*` → provider-owned typed historical before-fields (B10); `generatedFrom{kind,agentRunId}` → `revision_source(kind='agent_run')`; `operatorInstructions` → `listing_content.operator_instructions`; `keywordResearch` → `listing_work.listing_research` (proposal only) |
+| `create_locale` | `listing_content(proposal, intent='create', locale)`; `metadata.*` → fields; `dismissedFields[]` → `dismissed` state; `recommendationId(s)` → `revision_source` | `localeClass`, `variantId`, `englishGloss`, `hypothesisRequestId` (→ E4 parent), `operatorInstructions`, `keywordResearch` → mapped as for the previous row; `englishGloss.title/subtitle/promotionalText` and ordered `keywords[{word,meaning}]`, plus `metadataRevision`, `englishGlossRevision`, `englishGlossStatus` → **B10** pending exact domain-owned columns and revision-pin constraints. Reviewer translations must never replace approved provider text |
+| `revert_experiment` | **B** `requires_restore_snapshot`: the frozen original listing is not in `params` or `afterState`; it must come from `aso_experiment.changes` (domain) through a decoder not yet specified | `severity`, `origin`, `regressionSummary` → `facts.revert_*`; `regressions[]` → `regression` items |
+| `aso_revert_listing` | **B** `requires_restore_snapshot` (same reason); `capturedAt`, `locales[]` retained on the record | — |
+| `review_catch_up_30d` | `agent_work.request(intent='review_catch_up', window_days=days, review_mode=agentMode, origin='scheduled_agent', store)` | `appId`, `platform`, `unansweredCount` (undeclared keys, `review-catch-up-inbox.service.ts:106–113`): `appId`/`platform` R (equal the asset's store identity); `unansweredCount` → `facts.unanswered_count_at_creation` |
+| `generate_review_analysis` | `request(intent='review_analysis', window_days=days)` | — |
+| `asa_*` (7) | `ads_work.ads_content(proposal, intent per action, keyword_text, match_type, daily_budget_amount, bid_amount, currency_code)` + `apple_search_ads.target(campaign_id, ad_group_id, keyword_id/negative_keyword_id)`; `asa_update_keyword_bid.updates[]` → one child per update under a collection | — |
+| `agent_attention_needed` | `agent_work.advisory(kind='agent_attention_needed', agent_source_id=agentId, consecutive_failures, last_error, detail=lastError)` | `agentType` R (equals `pending_action.agentType`) |
+| `aso_review_needed` | `advisory(kind='aso_review_needed', detail)`; `failedLocales[]` → `failed_locale` items; `kind='protected_app_name_confirmation'` → `detail` | `recommendationIds`, `recommendationType`, `store` → `revision_source`/facts |
+| `connect_source` | `advisory(kind='connect_source', source_label, benefit, primary_link_label='Connect', primary_link_path=href)` | `connectorType` → `facts.connector_type`; `platform` R (equals `connector_type`) |
+| `store_app_access_lost` | `advisory(kind='store_app_access_lost', connector_source_id=connectorId, connector_type, connector_name_snapshot, detail=lastError, last_success_at, consecutive_failures, last_error, app_name_snapshot, bundle_id_snapshot, scraping_account_email_snapshot)` — exact field match | `platform` R (equals `connector_type`) |
+| `onboarding_audit_recommendation` | `advisory(kind='onboarding_audit_recommendation', detail=proposal, impact, effort, confidence_label, quick_win_source_id=id, recommendation_type=type, audit_store, audit_store_app_id, audit_country, audit_locale, audit_generated_at)` — exact match | `title` → `revision.title` |
+| `backlog_opportunity` (stage-refusal card, status `blocked`) | E3 consolidation; `advisory(kind='stage_blocker', blocker_reason_text=blocked_message, blocker_reasoning=stageBlocker.reasoning, unblock_* from `afterState.inboxBlocked.guide`)`; `stageBlocker.intent` → `stage_intent` | `title`, `description`, `market`, `gate`, `priority`, `proposedNextStep`, `capabilityTier` → the backlog row's own ledger (§4.7) |
+| `wake_agent` (executed, mode agent) | `request(intent='wake_agent', requested_agent_id, focus, context_text)`; `requested_agent_id` from same-tenant `resultRunId → agent_run.agentId` when that retained run proves the exact historical target; otherwise **B5**, never inferred from today’s replacement agent | terminal history (§10 D2) |
+| `propose_experiment` (executed) | **B**: no v15 intent for an orchestrator experiment proposal; preserve source while B4 specifies exact typed historical hypothesis and ordered field facts; never serialize structured fields into content_note | `experimentId` → facts |
+| `flag_issue` / `escalate` | `advisory(kind='flag_issue'|'escalate', detail)`; `title` → `revision.title`. Historical rows only (writer unreachable) | — |
+| `recommendations.ts:232` revised rows; `inbox-iteration` copies | decode by `action_key` as above; keys undeclared by the schema → per-row blocker | — |
+
+### 4.2 `agent_request` (30 columns; `schema.ts:4840–4953`)
+
+Writers: one insert (`agent-request.service.ts:259`), one canonical lifecycle updater (`drizzle-agent-request-repository.ts:31–93`), and the unblock, dedupe, repair and experiment-link updaters (census §1). Only two `evidence` shapes exist (`listing_change`, `locale_expansion`); `blocked` rows have empty evidence/outcome and a `blockerContext {platform, locale, field, …}`.
+
+| Column | Type · null | Disp. | Destination and rule |
+|---|---|---|---|
+| `id` | text NN PK | P | `action_alias(namespace='agent_request', old_id)` → the collection parent (or the single ticket); `source_record.source_id`. |
+| `organizationId` | text NN FK | P | `source_record`, `action`. |
+| `assetId` | text NULL FK | P | `source_record.asset_id`; NULL → `scope='organization'`. |
+| `agentType` | text NN | P | `agent_request_facts.agent_type` enum. |
+| `sourceAgentRunId` | text NULL FK | P | `action_revision_source(kind='agent_run')`; `facts.source_agent_run_id`. |
+| `kind` | enum text NN | P | `facts.kind` {hypothesis, investigation, draft, execution, blocked, informational}; only `hypothesis` and `blocked` are written at the pin. |
+| `phase` | enum text NN | P | `facts.phase`. |
+| `status` | enum text NN | P | `facts.status_at_import`; disposition per §9.1 (`open`/`blocked` importable; others history). |
+| `title` / `summary` | text NN | P | `action_revision.title/summary` of the parent revision. |
+| `evidence` | jsonb NN dflt {} | P | `listing_change`: header → `facts.plan_id`, `facts.recommendation_type`, `finding` children (`findingIds[]`); per locale → child `agent_work.request(intent='listing_change', store, locale, recommendation_type, plan_source_id=planId, finding_title, finding_rationale, finding_severity)`; the finding triple is all-present or the child is `historical_incomplete`; `language` → exact historical text snapshot; it is caller-supplied, not guaranteed reconstructible from locale (B10). `locale_expansion`: header → `facts.hypothesis_origin`(= hypothesisSource), `facts.wave_index`, `facts.demand_lookback_days`, `supportingEvidence[]` (string[], `locale-hypothesis.ts:48`) → `agent_request_supporting_evidence`; per locale → child `request(intent='locale_expansion', store, locale, language, reasoning, score, market_research_note, demand_lookback_days, origin)`; `demand` (`LocaleDemandSignal`) → `downloads, revenue_usd, impressions, page_views, review_count` (pageViews is an optional known source quantity, separate from impressions; exact request destination is B10); `demandCountries[]` → `agent_work.request_country(role='demand')`; `competitorMarket` (`CompetitorMarketSignal`) → `competitor_strength, localized_competitor_count, top_chart_count, estimated_market_downloads` + `request_competitor` rows. See the exact field/optionality inventory linked below: source numbers have no declared SQL scale/bounds; conversion must validate narrower destination types. Unknown fields block. `blocked` rows: `{}` required, else blocks. |
+| `proposedOutcome` | jsonb NN | R | Deterministic projection of `evidence` (`kind, store, recommendationType|waveIndex, planId, findingIds, locales[]`); equality is a census check; rows where it differs block. |
+| `whatWillHappen` | jsonb NN (string[]) | P/B10 | Preserve exact ordered text in an agent-domain history child keyed by `(record_id, ordinal)`, with text NN and tenant-qualified parent. Current template rendering cannot reconstruct old promises or old agent display names. Exact owner/relation must join the consolidated DDL before import. |
+| `approvalPolicy` | jsonb NN | P | `request.hypothesize_policy/draft_policy/execute_policy` (each `auto`|`await`; the triple all-present or all-absent per v15; `{}` → absent). |
+| `blockerCode` | text NULL | P | `facts.blocker_code` enum (6). Only `NO_OPEN_RELEASE` is reachable at the pin. |
+| `blockerContext` | jsonb NN | P | `{platform, locale, field}` → `facts.blocked_platform/blocked_locale/blocked_field`; spread caller context beyond those keys blocks; `{message, detail}` → `decision_claim(blocked).reason_text` (+ `detail` in `event_detail`); `unblockFinalization` → `app_store_connect.historical_unblock_finalization` + targets. |
+| `unblockGuide` | jsonb NN (`.passthrough()`) | P | `title, whatHappened, whyItMatters, next` → `advisory(kind='stage_blocker').unblock_title/unblock_what_happened/unblock_why_it_matters/unblock_next`; `steps[]` → `agent_work.content_note` ordered rows; `cta{label,href}` → `unblock_cta_label/unblock_cta_path` when internal, else a `content_note`; any passthrough key blocks. This mirrors the prototype (`backfill-requests.ts:459–500`). |
+| `pendingActionId` | text NULL FK | P | Preserve `facts.pending_action_source_id`; E4/B9 decides same-work handoff versus distinct child before creating membership. |
+| `recommendationIds` | jsonb NN (string[]) | P | **Holds pending_action ids** (census). Preserve ordered referenced IDs. E4/B9 proves each relation kind before creating membership; unresolved reference gets an explicit typed unavailable-target fact, not an invented child. |
+| `scenarioId` / `experimentId` | text NULL | P | `facts.scenario_id`, `facts.experiment_id` opaque. |
+| `idempotencyKey` | text NN, unique with org | P | `facts.idempotency_key`; the import command's canonical digest covers it. |
+| `supersededByAgentRequestId` | text NULL FK self | P | `action.successor_action_id`; never populated at the pin (census). |
+| `approvedBy` / `approvedAt` | NULL | P | `decision_claim(approved, …)`; `content_proof='unproved'` unless original decision evidence binds exact request content; drafted child pins alone do not prove that request approval. Directed requests are auto-staged with source status approved but explicitly had no separate hypothesis approval (`locale-hypothesis.ts:116–122`). Preserve status, initiation origin and policy; create no approval event from that shortcut. A real approval claim can retain actor_state unavailable when the actor is missing. |
+| `rejectedBy` / `rejectedAt` / `rejectionReason` | NULL | P | `decision_claim(rejected, …)`; ticket `declined`. |
+| `createdAt` / `updatedAt` | timestamp NN | P | `source_record.source_created_at/updated_at = utc()`. |
+
+### 4.3 `agent_request_event` (8 columns; `schema.ts:4955–4991`)
+
+| Column | Disp. | Destination |
+|---|---|---|
+| `id` | P | `source_record(source_kind='agent_request_event').source_id`; no public URL. |
+| `agentRequestId` | P | `source_record.parent_record_id` → the request's record (E9). |
+| `eventType` | P | `decision_claim.decision_kind` (created→`created`, approved, rejected, blocked, retried, superseded, completed, failed map 1:1). |
+| `actorUserId` | P | `decision_claim.actor_user_id`/`actor_state`. |
+| `sourceAgentRunId` | P | Preserve the source-run provenance link independently of actor attribution (exact source-link destination B10). Assign agent/system actor only from positive event-writer evidence; a NULL user plus a run ID is insufficient. |
+| `message` | P | `decision_claim.reason_text`. |
+| `data` | P | `history.event_detail` by variant (census §2 table): `{kind,phase,status,blockerCode}`→`request_state`; verification payloads→`unblock_verification`; `{queuedRunId, originalBlockerCode}`→`unblock_retry`; `{reason, detail}`/`{blockerCode, detail}`→`dispatch_failure`; `{repair:'FLO-822', …}`→`legacy_repair`; `{housekeeping, ageDays, maxAgeDays}`→`housekeeping`; dedupe message→`dedupe_collapse` (+`survivor_source_id` parsed from the fixed message); `{pendingActionIds}`→`draft_output` + targets. `{}` → no detail row. Unknown keys block. |
+| `createdAt` | P | `decision_claim.occurred_at = utc()`; `source_record.source_created_at`. |
+
+### 4.4 `review_draft_reply` (17 columns; `schema.ts:1209–1290`; all timestamps `timestamptz`)
+
+| Column | Disp. | Destination and rule |
+|---|---|---|
+| `id` | P | `action_alias(namespace='review_draft', old_id)` → review ticket (E6 key); `source_record.source_id`. |
+| `review_id` (unique) | P | `review_work.reply_content.provider_review_id`, `store`, `provider_app_id` from the `review` row (`review.id`, `review.platform`, `review.appId`); creation key input. |
+| `asset_id` | P | `source_record.asset_id`, `action.asset_id` association only. Canonical review identity is E6’s provider identity, not asset identity. |
+| `reply` | P | Current source reply snapshot. Only a complete newly executable proposal may adopt it after all source/baseline/recovery gates. Do not fabricate original revision times. |
+| `original_ai_reply` | P | When different, preserve original-AI and current text as distinctly tagged historical content snapshots with their real provenance. Import order is not historical revision chronology. Source updated_at belongs on source_record, not an invented revision column, and does not prove the edit time/actor. The exact historical content shape remains B10 (prototype requires_history_import). |
+| `model` | P | `generation_claim.model` (written by one writer, `review-agent.ts:1405`). |
+| `language` | P | `reply_content.detected_language_name` (English language name, FLO-1242). |
+| `prompt_tokens` / `completion_tokens` / `total_tokens` | P | `generation_claim.*_tokens`; **no writer at the pin** → expected NULL. |
+| `pending_send_at` | P | `delivery_claim.queued_for_send_at`; `queue_marker_kind` is unknown unless positive writer evidence distinguishes queue marker from 10-minute lease; timestamp ordering alone is insufficient because the same column serves both (`reply-helpers.ts:144, 181, 214`). Non-NULL → component `requires_recovery`. |
+| `sent_at` | P | Preserve `delivery_claim.sent_at`; origin is unknown unless exact content/target/operation-correlated evidence proves the writer. Same-review capability existence, absent model fields or equality to provider modified time does not prove Fload versus external authorship. A mirrored response is content observation, not write attribution. |
+| `send_attempts` | P | `delivery_claim.send_attempts`; `legacy_failure_sentinel = (send_attempts >= 999)`; this records the legacy convention, not proved provider finality (`change-published.ts:171`). |
+| `last_send_error` | P | `delivery_claim.last_send_error`. |
+| `readback_scheduled_at` | P | `delivery_claim.readback_booked_at`; non-NULL → recovery (an applied-readback ladder is booked). |
+| `created_at` / `updated_at` | P | `source_record.source_created_at/updated_at`; `generation_claim.draft_created_at/updated_at`. |
+
+Ticket disposition: unsent with no effect hints is only an executable candidate after all gates. Any sent/lease/attempt/readback hint requires recovery classification; status and calibration correlation never establish completion or external authorship. Preserve historical claims visibly without authorizing a resend. The exact non-executable historical presentation remains D2/B12.
+
+### 4.5 `review_draft_rejection` (11 columns; `schema.ts:1311–1350`)
+
+| Column | Disp. | Destination and rule |
+|---|---|---|
+| `id` | P | `action_alias(namespace='review_draft_rejection', old_id)` → the declined review ticket; `source_record.source_id`. |
+| `organization_id` / `asset_id` | P | `source_record`, `action`. |
+| `review_id` | P | creation key + `reply_content` identity from the `review` row. |
+| `rejected_by` | P | `decision_claim(rejected).actor_user_id` (SET NULL erasure → `unavailable`). |
+| `source_draft_id` | P | `action_alias(namespace='review_draft', old_id=source_draft_id)` → same ticket (the draft is deleted, E13); the rejection source record remains present; an independently typed draft referent carries absence. B10 requires that reference shape. |
+| `fingerprint_version` / `review_fingerprint` | P | Original digest/version copied verbatim into a Reviews-owned suppression claim (D4/D5), not relabeled as a new reply snapshot fingerprint. Suppression stays active. Unknown historical preimage or incomparable version never means source changed; the version bridge and exact typed claim shape remain B10. |
+| `draft_snapshot` | P | Twelve fields (`schema.ts:1293–1306`): `reply`/`originalAiReply` → revisions as in §4.4; `model`, three token fields → `generation_claim`; `pendingSendAt`, `sentAt`, `sendAttempts`, `lastSendError` → `delivery_claim` (ISO strings, `iso()`); `createdAt`/`updatedAt` → `generation_claim.draft_created_at/draft_updated_at`. No `source` field exists. Unknown key blocks. |
+| `reason` | P | `decision_claim(rejected).reason_text`. |
+| `created_at` | P | `decision_claim.occurred_at`; `source_record.source_created_at`. |
+
+### 4.6 `inbox_item_state` (10 columns; `schema.ts:5042–5086`)
+
+| Column | Disp. | Destination and rule |
+|---|---|---|
+| `id` | P | `source_record.source_id`; no URL. |
+| `organization_id` | P | `source_record`, `action_read`, `overlay_claim`. |
+| `user_id` | P | `action_read.user_id` or `overlay_claim.user_id`. |
+| `source_type` | P | wire enum {`agent_request`,`pending_action`,`pending_action_batch`,`review_draft_batch`,`agent_activity`} (`inbox.ts:78–84`) plus legacy `review_draft` (no writer; census expects zero). No known current producer for agent_activity; preserve original target and personal snapshot. Missing target is explicit; existing domain target does not justify dropped_reviewed without an actual reviewed disposition. |
+| `source_id` | P | `overlay_claim.target_source_id`; resolution: `pending_action`/`agent_request` bare ids via alias; `pending_action_batch:<key>` with `key = agentType:asset|org:action:priority[:existing|new]` (`pending-action-summary.ts:98–113`) → a stable historical alias resolver regardless of current open-member count (§5); review_draft_batch also preserves its reused historical namespace with membership unknown. No redirect to a newly assembled current package. |
+| `status` | P | All six statuses retain a personal overlay_claim snapshot with original target/note/times. A proved linked read can initialize action_read; unread remains unread. Read/unread uses personal_only. Other overlays remain pending_review until an explicit shared decision. New/unseen baseline content must not inherit a stale read watermark. |
+| `snoozed_until` | P | `overlay_claim.snoozed_until = utc()`. |
+| `note` | P | `overlay_claim.note`. |
+| `created_at` / `updated_at` | P | `source_record.*`; `overlay_claim.source_updated_at = utc()`. |
+
+### 4.7 `opportunity_backlog` (42 columns; `schema.ts:6479–6692`)
+
+Live rows (`proposed`, `staged`) become tickets under the v15 schedule-import branch (v15:1343–1366); `archived` rows are `terminal_history`. E1–E3 decide the canonical ticket.
+
+| Column | Disp. | Destination and rule |
+|---|---|---|
+| `id` | P | `action_alias(namespace='backlog_item', old_id)`; `source_record.source_id`; `action_revision_source(kind='backlog', source_backlog_id)`. |
+| `organization_id` / `asset_id` | P | `source_record`, `action` (asset NULL → org scope). |
+| `title` / `description` | P | `action_revision.title/summary`. |
+| `market` | P | advisory `market_label` when advisory; else `backlog_item_facts.market_text`. |
+| `gate` | P | advisory `gate_text` when advisory; else `facts.gate_text`. |
+| `priority` | P | `action.priority` smallint. |
+| `impact` / `risk` | P | `action.impact_label/risk_label` (D3) + `facts.impact/risk`. |
+| `capability_tier` | P | advisory `capability_tier`; `facts.capability_tier`. |
+| `work_definition_key` | P | `facts.work_definition_key` enum; selects the `work_params` decoder (registry schema). |
+| `work_execution_mode` | P | `facts.work_execution_mode`. |
+| `work_params` | P | executable rows: registry `parseParams` for `work_definition_key` → domain content exactly as the matching `pending_action.params` row in §4.1; advisory rows: `draft.params` verbatim (`backlog.service.ts:470`) — shapes `locale_generation` and `listing_sensor` (`ListingSensorRowParamsSchema`, `contracts/backlog.ts:351`) decode to advisory fields; other shapes block. |
+| `work_preview` | P | `WorkClientPreviewSchema` (strict) → `facts.preview_title/preview_summary/preview_fload_will/preview_client_will`. |
+| `work_preflight_receipt` | P | `WorkPreflightReceiptSchema` → `facts.preflight_ok` + `backlog_preflight_blocker` rows. |
+| `staged_intent_identity` / `rejected_intent_identity` | P | `facts.*_intent_identity` (format `candidate-receipt.ts:244`); the rejection identity is copied from the staged identity at rejection (`pending-action.service.ts:2127`). |
+| `status` | P | `facts.status_at_import`. |
+| `source` | P | `facts.source`. |
+| `source_report_version_id` / `source_report_id` / `latest_seen_report_version_id` | P | opaque facts + `action_revision_source(kind='report_version', source_report_version_id, source_candidate_coordinate=candidate_key)`. |
+| `candidate_key` / `candidate_source_kind` / `content_hash` | P | `facts.*`; `candidate_source_kind` is unenforced at the writer (`backlog.service.ts:449`) → outside the six values blocks. |
+| `evidence_refs` | P | `BacklogEvidenceRefSchema` → `backlog_evidence_ref` rows (`truth_slot`/`data_path`); the sibling `WorkEvidenceRefSchema` shape (`operator` kind, required label) is a different contract and blocks if encountered. |
+| `retirement_reason` | P | `facts.retirement_reason_code` for the six constants; free sentences → `retirement_reason_text`; also `decision_claim(archived).reason_*`. |
+| `supersedes_backlog_item_id` | P | `facts.predecessor_record_id` (E8). |
+| `staged_pending_action_id` | P | E1/E2 consolidation; `facts.staged_pending_action_source_id`. |
+| `staged_at` / `staged_by` | P | `decision_claim(staged, actor, utc())`. |
+| `available_at` | P | v15 migration-channel `schedule` command with `result_scheduled_for = utc(available_at)` (contingent on §7); `facts.available_at`. NULL stays NULL. |
+| `schedule_month` | P | `facts.schedule_month`. |
+| `stage_attempted_at` / `stage_refusal_reason` | P | `facts.*`; `decision_claim(stage_refused, system, utc(), reason_text)`. |
+| `rejected_at` | P | `decision_claim(rejected, unavailable, utc())` (no actor column exists). |
+| `archived_at` / `archived_by` | P | `decision_claim(archived, actor, utc())`; ticket `archived_at`; A sensor reason alone does not prove the actor; use unavailable unless the exact writer establishes system initiation. |
+| `created_by` | P | `decision_claim(created, actor)`; NULL → unavailable unless exact writer evidence establishes system/agent creation; report/agent source labels alone are not actor proof. |
+| `created_at` / `updated_at` | P | `source_record.*`. |
+
+### 4.8 `inbox_recovery_run` (6 columns; `schema.ts:4812–4834`)
+
+| Column | Disp. | Rule |
+|---|---|---|
+| `id`, `manifest_hash`, `organization_id` (NULL allowed), `manifest`, `applied_at`, `created_at` | **B1** | No writer, reader or type anywhere at the pin (only migration `0103` and the declaration). The `manifest` shape cannot be decoded from source. Outcomes: (a) census finds zero rows → reviewed retirement (drop in the contract phase); (b) rows exist → retain original rows under their actual scope while recovering the writer and a strict decoder; any archival/retirement alternative needs an explicit conservation, access and erasure design, not an untyped dump. Global rows (`organization_id` NULL) are never assigned to a tenant. |
+
+### 4.9 Retained domain tables (D)
+
+Every column below retains its domain owner, not necessarily its old physical type/table. Existing JSONB, approval/status authorities and readers still need closed domain schemas and a tested cutover. Actions links to origins but approves sealed snapshots, never the current mutable domain proposal. D does not waive the user’s strict-schema requirement.
+
+| Table | Columns (all D) | Link from Actions | Domain findings |
+|---|---|---|---|
+| `review_history` (13) | `id`, `review_id`, `rating`, `title`, `body`, `nickname`, `store_front`, `app_version_string`, `last_modified`, `edited`, `developer_response`, `draft_reply`, `captured_at` | none required; `reviewWorkCreationKey` identifies the review; the `review_history` URL namespace resolves to the domain row | `developer_response` is a 3-key projection (`responseId` coerced to string, `response`, `lastModified` epoch **ms**) dropping `isHidden`/`pendingState`; the Play `responseId` is the Fload surrogate `gp-<ms>`; `draft_reply.source` is the constant `'ai'` in all three writers and `'user_edited'` is never produced; `last_modified`/`captured_at` are naive but Drizzle-written (§7). No organization or asset on the row (B2). |
+| `aso_recommendation` (14) | `id`, `assetId`, `store`, `locale`, `type`, `riskLevel`, `evidence`, `proposal`, `status`, `createdBy`, `approvedBy`, `appliedAt`, `createdAt`, `updatedAt` | `action_revision_source(kind='recommendation', source_recommendation_id, source_present_at_insert)` from imported listing tickets | `proposal`/`evidence` have no Zod schema (`recommendation-loop.ts:90,100`; `evidence` does not conform to `ASOEvidenceSchema`); `type` values `icon`/`app_previews`/`cpp` and `approvedBy` are never written; 44 writer sites, not 13. |
+| `aso_recommendation_variant` (13) | `id`, `recommendationId`, `locale`, `proposal`, `status`, `supersededByVariantId`, `approvedBy`, `approvedAt`, `appliedBy`, `appliedAt`, `lastError`, `createdAt`, `updatedAt` | `action_revision_source(kind='recommendation_variant', source_variant_id)` | `appliedBy` receives the literal `'auto_detected'` into an FK→`user.id` column (`detect-manual-application.ts:155`; D6); statuses `approved`/`rejected`, `approvedAt`/`approvedBy`, `supersededByVariantId` are never written; `appliedAt` is NULL on `partially_applied` and missing on two `applied` transitions. auto_detected means the system observed a match; applying actor stays unknown. It proves neither full proposal equality nor Fload application (D6). |
+| `capability_execution` (15) | `id`, `organization_id`, `capability_key`, `work_id`, `pending_action_id`, `initiator`, `actor_user_id`, `outcome`, `unit_count`, `failed_unit_count`, `credits_charged`, `verification_outcome`, `verified_at`, `verification_detail`, `created_at` | `work_id`/`pending_action_id` stay opaque and resolve through `action_alias(pending_action)` and the review creation key (`review-reply:<reviewId>`); `initiator` preserves that log row’s claimed initiator; it does not prove an approval or the author of a later response | Best-effort execution/calibration log; insert may fail after successful work, and verification fields are mutable (`execution-log.ts:30–49,145–162`); `unit_count`, `failed_unit_count`, `credits_charged` are default-only at the pin; `verification_outcome`/`verified_at`/`verification_detail` **are** written (`execution-log.ts:154–162`); `outcome='partial'` unused. The `capability_execution` URL namespace resolves to the domain row. |
+
+---
+
+## 5. Aliases and old URLs
+
+The existing `action_alias` design has a non-null ticket target. That cannot represent every evidence-only, reused or unknown-membership historical link. Do not silently discard those links or weaken its FK without designing the alternative. **B13:** specify a closed resolver result with distinct ticket, domain evidence, historical group and unavailable-source cases, tenant-qualified keys and deletion rules. This is a design gate, not approval for a new generic alias table.
+
+| Namespace | Required resolution |
+|---|---|
+| pending_action, review_draft, agent_request, backlog_item, stage_blocker_card | Same permanent work identity after proven consolidation; preserve every source alias. |
+| pending_action_batch | Stable historical resolver even with zero/one open member. Reused key exposes known historical associations and explicitly unknown historical membership; never synthesize the old batch from today’s pending rows. |
+| review_draft_batch | Preserve the old asset batch link independently of new packages; unknown membership remains unknown. A post_batch manifest can prove its recorded bytes, but historical approval membership additionally needs original decision linkage. |
+| review_draft_rejection, including deleted source_draft_id | Declined work plus typed preserved snapshot and unavailable original-draft reference. |
+| agent_activity, review_history, recommendation, recommendation_variant, capability_execution | Retained domain ID through an authorized, tested domain resolver, including unavailable/erased source behavior. Do not assume a URL route exists merely because a table survives. |
+| recovery_receipt | Preserve existing link and scope; B1 until manifest and global/tenant ownership are decoded. |
+
+An unknown/erased link still has an explicit outcome. It must not redirect to unrelated current work or grant access from an opaque ID. Evidence-only sources and personal records may have no action_id; §3 already permits that, so “every migrated source has a ticket” is not a valid elimination argument.
+
+## 6. Actors and erasure
+
+| Source column | Destination | User erasure | Asset erasure (synthetic) | Organization erasure |
+|---|---|---|---|---|
+| `pending_action.approvedBy/rejectedBy/deletedBy`, `agent_request.approvedBy/rejectedBy`, `agent_request_event.actorUserId`, `review_draft_rejection.rejected_by`, `opportunity_backlog.staged_by/archived_by/created_by`, `afterState.supersededByGenerationRequest.requestedBy` | `decision_claim.actor_user_id` / `pending_action_state.gen_superseded_by_user_id` | erasure function sets FK NULL and `actor_state:='unavailable'` in one statement (immutability guard admits only this transition) | row goes with its `source_record` scope | cascade |
+| `inbox_item_state.user_id` | `action_read.user_id`, `overlay_claim.user_id` | **delete the row** (personal state) | with the target ticket | cascade |
+| `capability_execution.actor_user_id` | D | existing SET NULL | No asset FK; separate explicit policy needed for synthetic-asset cleanup; opaque IDs are not deletion authority | organization cascade |
+| `aso_recommendation.createdBy/approvedBy`, variant approvedBy/appliedBy | D | existing SET NULL | asset → recommendation CASCADE → variants CASCADE; surviving Actions source links show source unavailable | follows asset/organization graph |
+| `review_history` | D | domain-owned review facts | follows global review deletion; never delete a shared review merely because one organization is erased | shared-domain ownership, B2 |
+| migration principal | `action_command.actor_*` of import commands | system principal, not a user | — | cascade |
+
+Scopes: `source_record.scope='asset'` rows and all their leaves are deleted by the synthetic-asset erasure graph after v15's preconditions; `scope='organization'` rows only by organization erasure; a component with members in both scopes refuses asset erasure (R4). Nothing in `history` is ever erased through an opaque source id. `inbox_recovery_run` global rows are not imported (B1), so no global scope exists in `history`.
+
+---
+
+## 7. Time conventions and proof limits
+
+Drizzle’s pinned timestamp codec uses ISO UTC values on explicit Date writes and interprets naive reads as UTC. That supports **those writers** storing UTC wall time. It does not establish the historical session timezone for server defaults, raw SQL, operational backfills or older writers.
+
+For each timestamp field, retain its actual source precision and classify conversion by established writer/period provenance. `SHOW TimeZone` today, no override in current code, or a sampled one-second correlation cannot prove the timezone of historical values. Mixed Date/default writers in one column cannot be fixed by a column-wide assumption. Unknown historical provenance is `time_provenance_unknown`; preserve source rows and block the affected conversion, never shift data speculatively.
+
+ISO timestamps require an explicit offset; epoch milliseconds use the declared unit with exact round-trip checks. Cross-checks against afterState ISO values and report times are diagnostics, not proof of unrelated rows. NULL, missing, empty and precision are conserved where the source distinguishes them. Source modified time is not the time an approval or human edit occurred.
+
+The stored v1 review fingerprint uses local-time getters; preserve its bytes/version. A fixed meaningful-content fingerprint for new source snapshots needs the separate compatibility/suppression bridge in D4/D5. Recording today’s worker zone alone cannot reconstruct the original hash preimage.
+
+## 8. Queue and old-writer obligations
+
+Before census-apply the following must be stopped or drained and their state recorded; each obligation must have a reviewed durable successor or explicit non-executing historical/abandonment disposition before source retirement. Removing a job is never proof that a provider write did not happen. Freeze all old API, chat/MCP, agent, worker, scheduler and operational writers; the table below is a queue inventory, not the complete writer fence.
+
+| Obligation | Where it lives at the pin | Import rule |
+|---|---|---|
+| Queued reply sends (`pendingSendAt` marker/lease) | scraping queue `send_replies` jobs (`send-replies-enqueue.ts`), lease claims (`reply-helpers.ts:144/214`) | drain; a draft with `pendingSendAt` set is `requires_recovery` until the provider response is read |
+| Applied-readback ladders (`readbackScheduledAt`) | `reply-readback-scheduling.ts:182–303` bookings; `work-verification-<executionId>-<attempt>` jobs (`queue.ts:2294`) | reconcile exact issued work before releasing its booking; preserve native evidence. A mutable/best-effort capability verdict alone is not finality or guard-release authority |
+| Inbox iteration (`iterating` overlays) | `inbox-iteration` queue (`queue.ts:111`) | drain; an orphan `iterating` overlay is `pending_review`, never active work |
+| Approved listing applies | `apply_aso_listing_changes` (`queue.ts:110`), `aso-locale-expansion-apply` (`:106`) | drain; an approved action with a queued apply is `requires_recovery` |
+| Orchestrator check-backs | `trigger='check_back'` agent runs from `checkBackAt` (`orchestrator-agent.ts:1778–1828`) | stop the scheduler; preserve claims and explicitly classify any outstanding follow-up obligation; claim retention alone does not settle it |
+| Backlog auto-stage sweep | `backlog-auto-stage-scheduler` repeatable job (`auto-stage-scheduler.ts:38`) | stop before census; remove the repeatable job |
+| Report reconcile writer | `backlog/reconcile.ts` on report completion | freeze during cutover |
+| Agent-request dispatch / unblock verification runs | `agent-request-dispatch.service`, `agent-request-unblock.service` | stop; in-flight verification → `unblock_finalization.status='pending'` |
+
+---
+
+## 9. Import identity, dispositions, checks, fixtures
+
+### 9.1 Disposition rules
+
+All status cases are subordinate to complete decoding, identity/closure, time provenance, known baseline, suppression and effect-recovery gates. Unknown status never defaults to approved or done.
+
+| Source state | Required disposition |
+|---|---|
+| pending_approval / unsent draft / proposed backlog | Candidate open work only with complete typed content and no contradictory approval/effect history. |
+| pending_action.blocked | Preserve blocker and all approval/effect markers. Missing approvalPin does **not** prove never approved: an old writer overwrote afterState. Classify across complete source/history, then dependency/hold or recovery. |
+| approved / sent / attempted / queued / readback booked | Requires recovery of any possibly issued effect; no inferred completion or fresh resend. Historical approval stays a claim; executable adoption needs a fresh decision. |
+| executed / completed / failed | Preserve source status and evidence. No automatic completed_historical or handled_externally. Non-executable historical presentation is D2/B12; uncertain outstanding effects remain blocked. |
+| rejected / rejection snapshot | Declined suppression survives, even with an unknown old fingerprint preimage. Fresh baseline alone cannot reopen it. |
+| expired / superseded / deleted / archived | Preserve reason, links and timestamps; no authority imported. Verify no unresolved issued effect before final disposition. |
+| agent_request | Distinguish auto-staging policy, actual approval event, generation handoff, children and in-flight effects. An “other statuses → terminal” fallback is forbidden. |
+| inbox_item_state | Full personal source snapshot; read state stays personal; shared resolution is explicit. |
+| inbox_recovery_run | B1; not counted as successfully migrated until exact decoder/scope exists. |
+
+### 9.2 Identity and atomicity
+
+1. Establish the old-writer and dispatch freeze, account for in-flight effects, then take the authoritative census. Preflight is read-only and may produce a typed blocker report; **blocked preflight writes no successful import_component or accepted mutation command**. Removing a blocker permits a fresh preflight for the same source identities.
+2. Compute exact same-organization graph closure, including incoming/outgoing classified edges. Separate same-work equivalence classes from the larger atomic import component. Resolve shared-domain prerequisites in a stable snapshot with an explicit locking/version rule. The fingerprint binds sorted member identities/values, sorted typed edges, consumed domain identities/versions, and the importer/decoder version. Specify length-prefixed canonical encoding; ambiguous string concatenation is forbidden.
+3. Apply re-discovers closure and verifies all consumed dependencies and admitted fresh baseline captures. Changed membership, edge, row, target, version or mapping refuses atomically. Concurrent/overlapping imports serialize on the sorted source identities; uniqueness of each tenant/source mapping prevents overlapping components from creating duplicate work. Exact locks and constraint DDL remain part of the implementation gate.
+4. Command idempotency and import identity are separate. Stable command keys include component identity plus deterministic operation ordinal; the request digest binds the complete proposed mapping/fingerprint/version. A reused key with different payload gives idempotency_mismatch. An existing successful source mapping with changed source/closure gives source_changed regardless of any new command key. Check both before replay; same bytes replay without duplicate writes. An upgrade is an explicit separately designed reconciliation, never a changed key bypass.
+5. One **transaction** per component may contain multiple supported migration-channel commands, each with correct target/version chain and importer attribution. It also writes non-authorizing historical claims with their actual known actors. No ordinary create command impersonates reject/schedule or a targetless history-only import. B11 requires the exact audit anchor/command association for those cases before DDL is accepted.
+6. Commit complete valid tickets/revisions/aliases/memberships/history/dispositions and the successful component marker together, or none. Required baseline acquisition is a separate canonical operation; import performs no provider I/O. A missing baseline preserves sources and stable deterministic identity without an invalid open-ticket skeleton. Adoption revalidates source, target and head atomically. No imported approval, execution, attempt or Usage charge.
+
+### 9.3 Conservation checks (requirements, not run results)
+
+1. Reconcile all 12 source tables explicitly: seven proposed migrated kinds; inbox_recovery_run blocked/retired only through B1; four retained domain kinds. Per source/status, count = conserved + approved retirement + blocked. **No blocked rows may be dropped at contract.** Do not demand source_record rows for domain-retained or B1 rows outside its enum.
+2. Verify every source key, value and edge. Non-NULL-only assertions are insufficient: preserve relevant NULL/missing/empty distinctions, ordered array membership, duplicate occurrences, scalar precision and exact text. Retirements require their own equality/provenance proof. Fingerprints verify identity but do not replace value conservation.
+3. Fingerprint complete graph closure and consumed domain dependencies under the stable apply snapshot. Changed connected graphs, even with unchanged previously seen member rows, refuse.
+4. All historical URLs resolve through exact tenant-authorized typed outcomes, including reused batches, zero/one-member batches, evidence-only and unavailable targets. Missing membership must be disclosed, never fabricated.
+5. Same-work sources produce one work identity; true parents and children retain distinct identity. Old aliases never select a newer unrelated current batch. Every imported historical fact has scope/attribution without invented action targets.
+6. No historical hash/policy/status implies current approval, provider success or external authorship. Decision actor, exact content, membership, request outcome and observed content each need their own evidence.
+7. Every rejected source remains suppressed across version migration. Unknown/incomparable old digests do not count as meaningful change. No manufactured historical review snapshot from today’s review row.
+8. No approval/execution/attempt/Usage authored by import. All actual current commands keep importer attribution and valid target/version chains. Unsupported history-only attribution remains B11.
+9. User, asset, organization and shared/global review erasure are tested per actual graph, independent of optional ticket links. Personal unread notes disappear with the user. Erased domain references are non-authorizing and visibly unavailable.
+10. Timestamp conversion is backed by row/field writer provenance and exact precision checks; current session settings or approximate samples are not blanket proof.
+11. Strictly decode every source payload and known writer shape, including pageViews, gloss subtitle/keyword meanings, revision pins and unread notes. Unknown keys preserve source and block; no JSON/text bag fallback.
+12. Before old tables are dropped, all readers/writers are converted, including weekly/monthly reports joining capability_execution to pending_action; retained domain JSONB and secondary approval authorities must have completed their own typed migrations.
+
+### 9.4 Fixtures owed
+
+| Family | Required counterexamples |
+|---|---|
+| Retry/atomicity | Crash before/after component commit; blocked preflight then resolved retry; same key/different payload; new key against changed successful source; simultaneous overlapping imports. |
+| Graph stability | New incoming backlink; deleted member; components merging; changed review/receipt dependency with unchanged old rows; late legacy provider response after freeze. |
+| Commands | Parent/children plus declined child and scheduled work in one transaction; history-only and personal-only component attribution; exact replay creates no new command/fact. |
+| Approval/membership | Original hash codec vs new digest; current matching draft hashes without approval-time manifest; changed draft; lost approvalPin; directed hypothesis status approved with no separate approval. |
+| Delivery | Multiple old capability rows for different reply bytes; failed log insert after successful send; NULL model mirror; lease marker ambiguity; partial/uncertain effect; no fabricated completion/external actor. |
+| Conservation | All212 columns plus nested-property checklist; pageViews; all gloss fields/pins; custom whatWillHappen/language; differing autoApplied/source experiment references; NULL/empty/missing. |
+| Personal/links | unread with failure/summary note; unlinked target; agent_activity awaiting reviewed disposition; old batch with zero/one/many open members; reused review-batch ID; evidence-only/erased URLs. |
+| Suppression | Original timezone/algorithm versions; missing historical preimage; timestamp/nickname/app-version-only changes; meaningful rating/body/title/edited changes; unknown version; rejection remains suppressed. |
+| Erasure/retirement | User erased; asset→recommendation→variant cascade; shared review across organizations; global recovery manifest; mixed-scope component refusal; weekly/monthly historical report rows after old table removal. |
+| Time | Explicit-Date vs default/raw writer history, historical session-zone uncertainty, exact milliseconds/microseconds, missing offsets and changed current session timezone. |
+
+These are acceptance requirements. No runtime/migration fixtures were executed during this documentation review.
+
+---
+
+## 10. Source defects and destination gaps exposed by review
+
+| ID | Finding | Correct disposition |
+|---|---|---|
+| D1 | The blocked source status needs an explicit import branch; lost approvalPin makes a two-way pin test unsafe. | Use all approval/effect evidence and strict content classification (§9.1). Unknown history stays blocked; source blocker codes are facts, not automatic outcome/approval rules. |
+| D2 | Historical completed work needs a visible, non-executable home without fabricated approval/execution. | **Open B12.** Withdraw completed_historical inferred from a status/calibration row and handled_externally inferred from a mirror. Specify historical-only identity, display, commands/list-count inclusion and unresolved-effect handling before adding any Core lifecycle value. Existing source claims remain preserved and unexecutable meanwhile. |
+| D3 | New backlog impact/risk must survive and still support Mission Control. | Preserve original enum values in typed historical facts. Choose one owner for current assessment and its mutation/projection rules; action columns are a proposal, not an accepted duplicate mutable authority. |
+| D4 | Declined review suppression needs original digest/version and meaningful source-change semantics. | Reviews owns a typed historical suppression claim distinct from a new proposal’s source snapshot/hash. Never assign today’s review content to a historical rejection preimage. Exact shape is B10. |
+| D5 | v1 review fingerprint uses process-local time and hashes a different field set from v15 meaningful change. | Preserve original bytes/version; build a tested version bridge. New meaningful-change contract uses rating/body/title/provider-edited flag; time/nickname/app-version drift alone cannot reopen. If old preimage/equivalence is unknown, automatic suppression remains until explicit resolution; incrementing CURRENT version must not exclude old rejections. |
+| D6 | ASO detector writes auto_detected into a user FK and observes only matching comparable content. | Preserve system observation separately from unknown applying actor. ASO owns the proper typed observation migration; do not invent a system application or service user. Rehearsal checks actual constraints/data; source alone cannot establish why a sentinel persisted. |
+
+These source defects justify narrow owner-specific corrections, not a fresh ownership redesign. The original ledger also revealed schema gaps; B9–B13 name them explicitly.
+
+---
+
+## 11. Remaining gates
+
+| ID | Blocker | Required closure |
+|---|---|---|
+| B1 | inbox_recovery_run has no known current writer/decoder; organization may be NULL. | Census zero→reviewed contract retirement; otherwise recover writer and strict typed scoped retention. No arbitrary tenant and no open archival payload substitute. |
+| B2 | Review facts can be shared across connected organizations. | Retain Review ownership with explicit authorized readers and shared deletion graph; an arbitrary asset/draft does not establish sole tenant ownership. |
+| B3 | Restore proposals need exact frozen experiment listing content. | Experiment-owned strict decoder and stable consumed source version, or explicit reviewed disposition preserving history. Current re-derivation alone cannot prove old proposal equality. |
+| B4 | Historical propose_experiment intent has no destination. | A finite typed historical shape/intent with all fields, or justified reviewed retirement; content_note cannot hide structured payloads. |
+| B5 | wake_agent records type without proven historical agent ID. | Use same-tenant resultRunId→agent_run.agentId when it proves the actual selected historical target (orchestrator-agent.ts:1539–1542,1574–1587). Missing run proof stays unavailable; today’s matching agent may be a replacement. Any new proposal selects current target with fresh authorization. |
+| B6 | Named TypeScript contracts were abbreviated rather than enumerated. | Source inventory is now enumerated in the linked appendix; exact destination required/forbidden matrices, SQL types and nested writer decoders remain open. Source enumeration alone is not DDL. |
+| B7 | Historical approval authority. | **Settled:** claims only; no import creates current approval. Fully proved old pins do not waive fresh authorization. |
+| B8 | Real data and historical time/constraint provenance unknown. | Representative rehearsal/census and conservation assertions, explicitly separated from this source-only review. |
+| B9 | Per-kind source graph and canonical review identity. | Classify request/package handoff vs child vs same-work, reconcile provider identity vs prototype asset key; typed edges and stable alias proof. |
+| B10 | Exact owner/fields/matrices missing for known facts. | Enumerate pageViews, full gloss and pins, prose/language, original/current historical content, source-run provenance, missing draft referent, suppression, collection facts, stage termContext, before-state and provider release/verification leaves. No generic bag; complete SQL constraints and erasure. |
+| B11 | Component command/audit attribution, especially history-only imports. | Exact supported command sequence, targets/version chains and non-authorizing migration audit anchor. Do not add targetless create exceptions by implication. |
+| B12 | Historical-only work presentation/outstanding effects. | Exact typed state/projection, allowed commands, honest list/count semantics, recovery disposition and permanent identity. No fake completion or reopened uncertain work. |
+| B13 | All old URL shapes, including reused groups/evidence-only. | Typed stable resolver contracts plus tenant/erasure tests; preserve every known old link independent of open member count. |
+
+---
+
+## 12. Normalization and ownership decision
+
+Keep one authoritative owner per fact. Historical source claims, approved immutable content and current workflow authority are different facts even if they originated in the same legacy row. Conversely, a 1:1 key alone does **not** justify a new physical table: many columns depend on that same key, and the proposed pending_action_state/claim leaves still need consolidation and variant review.
+
+| Owner | Conserved facts | Must not become |
+|---|---|---|
+| Actions | Permanent identity, exact current commands/revisions/approval, shared lifecycle, personal read state | Interpreter of provider field names or historical status heuristics |
+| Reviews / listing / ads / agent domains | Closed content, original suppression, generation/request meaning and historical wording | Mutable backdoor to approved content or a second approval executor |
+| Provider schemas | Native receipts, targets, historical before-fields, release resolution and native verification | Native fields in shared Core/history state or open field/value bags |
+| Migration history | Source identity/edges, non-authorizing actors/times/claims, successful conservation receipt | Runtime job engine, automatic provider finality or replacement for missing data |
+| Retained ASO/review/calibration domains | Existing distinct domain facts and IDs, migrated to closed schemas as needed | Permanent legacy JSONB exemption, duplicated history table or independent dispatch authority |
+
+Retaining capability facts avoids an unnecessary duplicate imported_execution_claim, but its current verification updates and best-effort insertion are documented limitations. A future calibration feed derives idempotently from durable Actions facts; it cannot be the confirmation boundary.
+
+**Contract removal requires consumer closure:** weekly-report/data.ts:410–429 and end-of-month/data.ts:1214–1241 currently join capability_execution to pending_action. Replace these with tenant-qualified typed source/alias/history reads; handle missing/erased/non-ticket rows without inventing asset attribution. Review domain detail URLs, approval/application writers and ASO reset deletion paths too. These concrete dependencies prevent dropping the old table today.
+
+**No final table count is approved.** Finish the exact missing facts/variant matrices, then consolidate by owner, determinant, cardinality, lifecycle and access/erasure rules. The earlier source-shaped history tables are proposals, not a clean-schema conclusion. Consolidated DDL, closed API/types, no JSONB/open payloads and real-role/migration/runtime proof remain required.
+
+Implementation remains paused; nothing here authorizes a code change, a migration or a source retirement.
