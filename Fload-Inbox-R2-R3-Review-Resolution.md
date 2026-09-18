@@ -2,6 +2,8 @@
 
 18 September 2026 · Documentation correction · Implementation paused
 
+**Subsequent review:** the independent v2 review confirms these corrections. [Six clarifications and the next ledger deliverable](Fload-Inbox-R2-R3-v2-Review-Resolution.md) are now recorded in the current v2.
+
 **The first R2/R3 draft is not implementation-ready.** Its direction is useful, but some rules contradict accepted evidence contracts and several promised historical facts have no destination. The [corrected draft v2](Fload-Inbox-R2-R3-Schema-Design-v2.md) replaces those rules and makes the remaining schema work explicit. The accepted ownership-v6 review stays closed.
 
 [Visual overview](ownership-overview.html) · [Actual source fields](Fload-Inbox-R3-Source-Fields.md)

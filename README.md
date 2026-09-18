@@ -1,5 +1,7 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: R2/R3 v2 review confirmed · six clarifications applied.** [Review disposition and next deliverable](Fload-Inbox-R2-R3-v2-Review-Resolution.md) · [Current v2](Fload-Inbox-R2-R3-Schema-Design-v2.md) · [Visual overview](ownership-overview.html). Next: the field/relationship conservation ledger. Ownership v6 stays accepted; full codecs, destination schemas, DDL and migration proof remain open. Implementation is paused.
+
 **Latest: R2/R3 corrected draft · 18 September 2026.** [Visual summary](ownership-overview.html) · [Corrected evidence and migration rules](Fload-Inbox-R2-R3-Schema-Design-v2.md) · [All 212 source fields](Fload-Inbox-R3-Source-Fields.md) · [Review findings and corrections](Fload-Inbox-R2-R3-Review-Resolution.md). Ownership v6 remains accepted. Exact destination mappings, codecs, consolidated DDL and runtime/migration proof remain open; implementation is paused.
 
 
