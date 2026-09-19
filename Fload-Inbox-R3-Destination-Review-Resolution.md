@@ -1,5 +1,8 @@
 # R3 destination contracts — review and corrections
 
+**Latest follow-up:** [Destination v2 independent review](Fload-Inbox-R3-Destination-v2-Review-Resolution.md) applies the capture/restore/source clarifications and records [parallel cap, UI and cleanup work](Fload-Inbox-R3-Parallel-Work-Coordination.md). No implementation or migration proof is implied.
+
+
 19 September 2026 · Documentation only · Implementation paused
 
 The new proposal makes real progress on concrete fields, but its claim that B9–B13 were complete was premature. The corrected v2 and historical-ticket companion preserve the settled ownership architecture and repair the specific contracts below. These are documentation changes; no application schema or migration has been applied.

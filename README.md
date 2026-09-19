@@ -1,5 +1,12 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: destination v2 review follow-up · 19 September 2026.** [Visual overview](ownership-overview.html#destination-heading) · [Review disposition](Fload-Inbox-R3-Destination-v2-Review-Resolution.md) · [Current contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Parallel cap/UI/cleanup coordination](Fload-Inbox-R3-Parallel-Work-Coordination.md).
+
+Canonical baseline capture is allowed without reopening history; restore intent is explicit; adoption uses existing revision links. Source claims about archives and handoff writers are corrected. Standing-cap/month grouping changes and fresh-census requirements are recorded. These remain proposed contracts: no application change, final table count, migration or runtime proof is claimed.
+
+---
+
+
 **Latest: destination contracts v2 · 19 September 2026.** [Visual summary](ownership-overview.html#destination-heading) · [Corrected concrete contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Review corrections](Fload-Inbox-R3-Destination-Review-Resolution.md).
 
 Provider aliases stay outside Core; repeated rejections, exact content and actor provenance are preserved; replay and schedule ordering are corrected. All 13 keyword-context fields and the successful release-verification shape are mapped. The new companion proposes safe same-ID historical→fresh-work transitions using existing commands. B9–B13, consolidated DDL, data rehearsal and runtime proof remain open. Implementation is paused; no final table count is approved.

@@ -1,6 +1,8 @@
 # FLO-1355 — R3 destination contracts v2
 
-19 September 2026 · Corrected proposal · Documentation only · Implementation paused
+19 September 2026 · v2 review follow-up applied · Documentation only · Implementation paused
+
+**Review follow-up:** [Disposition of M1–M3 and L1–L6](Fload-Inbox-R3-Destination-v2-Review-Resolution.md). Baseline capture, explicit restore intent, adoption provenance, native identity proof, archive scope and actual handoff writers are clarified below. The reviewed inputs are preserved unchanged; no new architecture version or final DDL is claimed.
 
 **Status:** this is a concrete destination-contract increment, not final DDL or closure of B9–B13. Ownership v6 and the clarified R2/R3 v2 remain the governing design. The corrected conservation ledger remains the source-preservation contract. New historical-purpose, head and presentation rules need the integrated matrices identified below before acceptance. No final new-table count is approved.
 
@@ -72,6 +74,25 @@ Later resource discovery leaves the canonical key unchanged. Concurrent discover
 
 `action_alias` remains the closed resolver for old Fload identities. The v15 additions `backlog_item` and `stage_blocker_card` remain appropriate. Alias uniqueness is tenant-qualified; no delimiter-encoded provider tuples are stored in Core.
 
+
+#### Candidate ASC native association (L3)
+
+Name the provider-owned landing relation `app_store_connect.review_resource_link`; it is a proposed identity association, not a second ticket or execution authority.
+
+| Field | Type / constraint |
+|---|---|
+| organization_id, provider_app_id, review_resource_id | text NOT NULL; composite PK, scoped to the exact native app; conservatively avoid claiming resource-ID uniqueness across all apps/accounts |
+| action_id | text NOT NULL; same-tenant Actions FK; exact iOS review identity must match the evidence |
+| proof_revision_id | text NOT NULL; same-tenant/same-action sealed observation reference with both review_work.reply_content and app_store_connect.review_target leaves |
+| provenance | closed enum `canonical_identity_observation`; no cached-ID or fuzzy-match branch |
+| proved_at | timestamptz NOT NULL; server time this association was admitted, not source/provider occurrence time |
+
+The proof revision must bind the original review ID, provider app, account scope and official resource ID through the provider identity codec. Reject ambiguous same-rating/nickname/body matches; those facts are not a durable cross-ID proof. Source review-response-reader.ts trusts cached IDs and chooses the first matching candidate, so neither its cached result nor a provenance label is accepted automatically. Exact identity/correlation admission is still part of R2/B9; until that codec exists, this branch is disabled. Import never fabricates an observation to turn a cache into proof.
+
+No `UNIQUE(organization_id,action_id)` is added without a demonstrated native one-to-one lifetime rule. The same proven alias cannot point to two tickets; multiple observation/target revisions may legitimately repeat it. A unique index on per-revision leaves is therefore not equivalent. Additional aliases for an action require their own exact proof and cannot mutate previous associations. Conflict/refusal preserves both evidence and the existing target. API-only producers without app/identity proof remain blocked instead of creating another action.
+
+Immutable once admitted; tenant/action erasure removes the scoped association. Ordinary provider disappearance does not erase it. The proof FK must not depend on the mutable legacy review row; proof-erasure availability and native account-scope/ownership rules remain integrated DDL gates. Play numeric/package lookup continues through its separate typed bridge in §1.2, never this ASC relation.
+
 ### 1.4 Edge classification, canonical keys and closure
 
 Compute typed relationships and same-work equivalence classes **before** assigning keys. A referenced card is not automatically the same work as its request. A linked blocked request is not automatically a dependency. E4 is classified using the exact request variant, immutable output/intent, domain scope, locale/store and retained handoff evidence.
@@ -93,6 +114,18 @@ Compute typed relationships and same-work equivalence classes **before** assigni
 Canonical identity precedence within a **proved equivalence class**: review tuple; otherwise proved request/child lineage anchor; otherwise the exact retained pending-card anchor; otherwise backlog/request singleton. A proven existing permanent target always wins. Do not compute a card-derived key for E1 and an incompatible request-derived key for E4 and then reject a normal handoff. All class members receive the one selected key and aliases. Conflicting semantic identities still block; precedence cannot merge different intents or provider targets.
 
 Child anchors require the full domain discriminator (store, locale and intent/role as applicable), not locale alone. The exhaustive E4 source-variant matrix and byte codec remain B9 design work; ambiguous variants stay blocked. No newly inferred child becomes approval-time membership.
+
+
+#### E4 source variants checked in this follow-up
+
+| Variant | Actual writer and output | Safe mapping |
+|---|---|---|
+| listing_change hypothesis | listing-change-hypothesis.ts:110–155; aso-agent.ts:1185–1187 writes **both** pendingActionId=applyCardId and recommendationIds=[applyCardId] | Request/package and card may share a proved class; derive per-locale child intent only from exact retained content. The review's claim that this pendingActionId writer is unidentified is incorrect |
+| locale_expansion hypothesis | locale-hypothesis.ts:199–224 stores returned card references; aso-agent.ts:464–477 passes hypothesisRequestId to locale staging | Returned IDs are references, not proof of N newly created drafts or approval-time membership |
+| Locale output variants | locale-expansion.ts:2012–2038 uses action=create_locale with localeClass=create/update/repair and a reused asset/locale card ID; :2087–2135 can retain a protected human-edited row while discarding newly generated copy | Do not force intent=create, attribute unchanged copy to this generation, or mint a request-derived identity for an already proved target. Preserve exact locale class and historical request/card references |
+| blocked request | aso-agent-request-blockers.ts:102–124 creates no pendingActionId link itself | Distinct work; admit a neutral dependency only with retained same-tenant relationship and readiness proof |
+
+The illustrative new-child anchor uses organization + stable lineage anchor + store + locale + domain role, encoded as an explicit LP tuple. Mutable create/update/repair intent is revision content, not a reason to re-key permanent work. A proved existing target takes precedence. Reused IDs and missing original content cannot manufacture a generation handoff revision. The remaining E4 work is strict variant/relationship decoding and conflict/partial-output fixtures, not rediscovering the already identified completion writer.
 
 Atomic closure includes E1–E9, E13 **and E14**, including incoming and outgoing relationships within the organization. E10–E12 remain independently versioned consumed dependencies unless their actual ownership edge requires inclusion. Apply rediscovery binds all members, edges, source versions and shared-domain facts per ledger §9.2. Missing target is an exact unavailable reference; cross-tenant target blocks. An absent dependency ticket is not fabricated from a blocker code.
 
@@ -147,6 +180,9 @@ Each row: destination, SQL type/nullability, closed values, determinant/cardinal
 | rejection plus later draft | Preserve the decline and both texts. Later content cannot be the current approvable head until an accepted explicit replacement transition; no implicit reopen |
 
 Snapshot created_at is the import instant. Original source timestamps stay separately labelled and undergo provenance checks. Historical content never creates an execution, provider attempt, LLM usage record or current approval.
+
+
+**Named adoption reference (L2):** use the existing immutable accepted revise command target: `(organization_id, action_id, previous_revision_id, result_revision_id)`. For historical→work adoption, previous_revision_id is the exact sealed historical display head and result_revision_id is the new sealed proposal on the same ticket; previous/result record_kind make the transition explicit. Same-tenant/action FKs, revision order and exact expected-head checks apply. This edge is the typed provenance link, so no adopted_from_revision_id column is needed. It proves deliberate adoption, not byte equality or LLM generation. Do not overload generated_from_revision_id or the observation evidence_revision_id. A different non-head source snapshot requires its own reviewed provenance contract; it cannot be silently substituted here.
 
 ### 2.5 Rejection preservation and suppression (Reviews-owned)
 
@@ -266,6 +302,8 @@ Command keys bind component identity + deterministic ordinal + command kind thro
 
 Under deterministic ordered locks: (1) validate every reused command key/digest before any semantic replay; mismatch is idempotency_mismatch. (2) Independently re-discover exact source closure and consumed dependency versions, then validate every source's successful ownership. A new command key cannot bypass source_changed; mixed/overlapping owners are component_conflict. (3) Replay only when the whole source set, mapping, capture set and complete command plan agree with the recorded successful receipt. Never return after the first matching member. (4) Otherwise insert a new complete component atomically.
 
+If a reused command key has a different digest, keep idempotency_mismatch as the stable primary refusal and never overwrite its original receipt. A separately authorized read-only preflight report may also record a **verified** source_changed finding. Do not inspect source content before authorization, append an untyped diagnostic bag, or let a supplementary diagnosis change replay precedence. A combined closed diagnostic schema is future contract work; no receipt mutation is implied by this review (L4).
+
 Carry ledger §9.2's old-writer freeze, in-flight-effect accounting, stable dependency snapshot and sorted source locks. Revalidate incoming as well as outgoing edges at apply. Uniqueness conflict rolls back and re-enters the checks; it never means automatic success. No provider I/O inside import. Changed mapping is an explicit separately designed reconciliation, not a changed key trick.
 
 ### 3.3 One component transaction, exact version chain
@@ -273,7 +311,8 @@ Carry ledger §9.2's old-writer freeze, in-flight-effect accounting, stable depe
 1. Create all admitted tickets at version=1/attention_version=1 with migration principal, channel=migration. Initialize valid sealed heads, content, aliases and proved relationships before commit. A NULL-head skeleton may exist only transiently inside the transaction; executable work still needs every current baseline/shape gate. Historical-only materialization is subject to §4's pending matrix.
 2. Apply source-proven schedules to targets **while they remain open**, before decline/supersession. Preserve inadmissible or uncertain dates as claims; never guess timezone.
 3. Apply supported reject/supersede transitions in deterministic target order. Each reads the exact preceding revision/version; do not hardcode expected_version=1 after scheduling. A historical rejection needs the explicit non-authorizing command/head branch in §4; do not fake a complete proposal to pass old guards.
-4. Write personal reads, immutable historical facts, component_command links and successful component marker in the same transaction. Historical actors belong to claims; commands keep importer attribution. No historical approval, execution, attempt or Usage charge is created.
+4. Apply import archive placement only for proved shared source placement after same-work reconciliation and the effect gate. `opportunity_backlog.archived_at/archived_by` are actual fields; `pending_action` has deletedAt/deletedBy and **no archived_at**. Do not translate deletion or a personal archived overlay into shared archive. An archived catch-up/replaced predecessor alone cannot hide an active staged card in the same work class. Where archive is admitted, issue an attention-neutral migration archive command after terminal dispositions, with exact version/head, previous/result archived_at and importer actor. Retain the original occurrence/actor separately as the history claim; command accepted_at and result_archived_at describe migration-time placement, not the old event. Never backdate command acceptance to make those meanings coincide. Historical_deleted remains a tombstone and does not receive a fabricated archive command.
+5. Write personal reads, immutable historical facts, component_command links and successful component marker in the same transaction. Historical actors belong to claims; commands keep importer attribution. No historical approval, execution, attempt or Usage charge is created.
 
 Atomic commit or no component facts. Blocked preflight has no successful marker or accepted mutation command. Scheduling does not bump attention; meaningful decision changes follow existing attention rules. Example owed: **the same ticket** has an inherited schedule and rejection, not merely separate scheduled and rejected tickets.
 
@@ -288,14 +327,14 @@ A [concrete companion matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) now sp
 | Proposed record kind / decision | Head and authority | Allowed path |
 |---|---|---|
 | work / existing decisions | Sealed proposal, existing complete baseline and exact approval rules | Existing runtime matrix unchanged |
-| historical / open | Sealed historical display head; NULL approval; no approval/execution rows | Archive/assign/placement restore; authorized revise/edit can adopt fresh work |
-| historical / declined | Same non-authorizing historical head and no approval/execution | Archive/assign; explicit current human restore reconsiders to historical/open; automatic replace_declined only with every v15 meaningful-change guard |
+| historical / open | Sealed historical display head; NULL approval; no approval/execution rows | Archive/assign/restore(placement); canonical baseline record_observation under §4.1; authorized revise/edit can adopt fresh work |
+| historical / declined | Same non-authorizing historical head and no approval/execution | Archive/assign; explicit restore(reconsider) to historical/open; qualified source-change record_observation and replace_declined only with every v15 meaningful-change guard |
 | historical / superseded | Same head; exact valid successor required | Archive and follow successor; no reopening |
-| historical_deleted / open, declined or superseded | Historical display head, no approval/execution; hidden from lists after full effect disposition | Explicit current human restore unhides to historical, preserving decision/head/successor; it does not also reconsider a decline |
+| historical_deleted / open, declined or superseded | Historical display head, no approval/execution; hidden from lists after full effect disposition | Explicit restore(unhide) to historical, preserving decision/head/successor; it does not also reconsider a decline |
 
 Add previous_record_kind (nullable only on create) and result_record_kind NOT NULL to the existing action_command_target, with exact locked before/after values. Create sets the initial kind; only explicit deleted-record restore changes historical_deleted→historical, and eligible revise changes historical→work. Work never transitions back to historical. The source snapshots and deletion/rejection claims remain immutable.
 
-**Same-ID fresh work:** historical/open + present authorized revise/edit + complete fresh proposal/baseline + exact head/version/source/identity/effect checks → work/open on the same ID and creation key, current_approval_id still NULL. The new proposal is a separate sealed revision; preserve the old display revision. Increment version/attention once through revise. Background discovery cannot perform that edit or create a duplicate ticket. Declined human reconsideration is a separate explicit restore first; deleted declined records need an unhide first without removing suppression. Automatic replacement requires comparable source-change proof; unknown legacy preimages remain suppressed.
+**Same-ID fresh work:** historical/open + present authorized revise/edit + complete fresh proposal + any baseline required by its domain/operation + exact head/version/source/identity/effect checks → work/open on the same ID and creation key, current_approval_id still NULL. The new proposal is a separate sealed revision; preserve the old display revision. Increment version/attention once through revise. Background discovery cannot perform that edit or create a duplicate ticket. Declined human reconsideration is a separate explicit restore first; deleted declined records need an unhide first without removing suppression. Automatic replacement requires comparable source-change proof; unknown legacy preimages remain suppressed.
 
 The committed-head constraint becomes this finite matrix, never a blanket removal of proposal checks. Initial create may use the existing bounded uncommitted NULL-head skeleton but must insert/seal the admitted historical display leaf and matching command target before commit. Migration reject/supersede are restricted to newly created historical identities with conserved exact claims and importer attribution. Historical kinds receive no schedule; source dates remain claims. Ordinary approval, iteration, execution, dependency completion and recovery commands refuse historical heads. Personal reads are separate.
 
@@ -303,13 +342,20 @@ The committed-head constraint becomes this finite matrix, never a blanket remova
 
 Both historical completion and deletion require a positive, recorded disposition of all possible issued effects in the component. Absence of best-effort logs/hints is not proof of no effects. Any unresolved effect remains visible in the cutover recovery/blocker process and prevents source retirement; not a hidden terminal historical ticket.
 
-**Read model rule:** one ticket counts once. If historical source-reported completion is shown in a Done group, it must remain explicitly unverified and cannot satisfy success/dependency metrics. The companion proposes an Imported history group in the same list, excluded from verified-success totals; final product/read-model acceptance and implementation remain B12 work. Placement selects the latest proved relevant occurrence timestamp for that ticket; ties use stable source-kind/source-ID/claim-ID ordering. Unknown occurrence stays “Date unknown”, never import time. The exact same eligible relation, selector, NULL order and ticket-ID tiebreaker drives lists, counts and cursors. Claims must not multiply counts.
+**Read model rule:** one ticket counts once. If historical source-reported completion is shown in a Done group, it must remain explicitly unverified and cannot satisfy success/dependency metrics. Placement is undecided: existing Done groups with an explicit legacy-source label, or a new labelled group within the same list. Neither option is accepted here; both exclude these rows from actionable/in-progress and verified-success totals. No new tab is introduced. Placement selects the latest proved relevant occurrence timestamp for that ticket; ties use stable source-kind/source-ID/claim-ID ordering. Unknown occurrence stays “Date unknown”, never import time. The exact same eligible relation, selector, NULL order and ticket-ID tiebreaker drives lists, counts and cursors. Claims must not multiply counts.
+
+**Visible suppression policy (L6):** an imported currently effective decline with an unknown original fingerprint preimage stays suppressed even if the review now looks edited. The current source filter can admit a changed fingerprint when no matching rejection receipt remains; that is weaker evidence. The conservative new rule requires explicit present reconsideration for this legacy case. Explain that reason and offer the authorized reconsider action; do not silently present it as ordinary automatic drafting or fabricate a new original snapshot. Later valid declines use their own exact source, so this is not a permanent veto from old history.
 
 Unresolved personal overlays stay non-ticket facts (`resolution=pending_review`) visible to authorized operators and the target detail, not shared workflow or counts. A present authorized shared command may resolve one with the current actor/time. User erasure deletes personal annotations. No correlation-based historic decision inference.
 
 **Gate:** the full proposed matrix and same-ID transition are now written in the companion; until reviewed and validated, B11/B12 materialization is blocked for these rows. Conserving a source does not require pretending the proposed storage already works.
 
 ---
+
+
+### 4.1 Follow-up command fields and provenance
+
+The companion now explicitly permits canonical record_observation for historical/open preparation and qualified historical/declined source-change capture, using the carried refresh boundary/read-start/evidence fields. It records evidence only, never a head or approval. The failed-perform-reopen guard remains unchanged. Restore now has required restore_mode=placement/reconsider/unhide in its strict payload, action_command column and digest, checked against exact before/after kind/decision. The existing revise target links the previous historical head to the new proposal; no new adoption column or generation/effect evidence is invented. Full matrices and source-bound read ordering are in the companion.
 
 ## 5. B13 — Old links and evidence-scoped historical groups
 
@@ -342,7 +388,7 @@ This pass does not approve ten additional tables. The submitted arithmetic count
 
 | Owner | Concrete delta under review | Decision |
 |---|---|---|
-| Actions | Historical purpose/head/display, record-kind command snapshots and same-ID future-work matrix | Concrete companion proposal; B11/B12 acceptance/validation open |
+| Actions | Historical head/capture matrix, explicit restore_mode, existing revise-target adoption edge and record-kind command snapshots | Concrete companion proposal; B11/B12 acceptance/validation open |
 | Actions aliases | backlog_item/stage_blocker_card only | Native ASC/Play namespace additions removed |
 | Reviews | Import rejection claims; exact snapshot links; runtime source fingerprint evidence | Preserve repeated facts; no fingerprint uniqueness or bare preimage flag |
 | Listing / agent domains | Full gloss pins, page_views, original content, collection facts, partial-policy history, 13-field term context | Concrete fields mapped; combined historical leaf matrices still required |
@@ -379,7 +425,7 @@ No impact/risk mirror is added to Core. No new JSONB, EAV, serialized object tex
 
 | Gate | What is now concrete | Still needed before closure |
 |---|---|---|
-| B9 identity/edges | Core/provider alias boundary; tuple collision rule; E14 closure; no automatic request-kind union | Complete E4 variant matrix/child codec; proved Play scope/history/evidence and erasure references |
+| B9 identity/edges | Core/provider alias boundary; tuple collision rule; E14 closure; no automatic request-kind union | Finish E4 strict variant/child codec from the now traced writers; prove ASC association and Play scope/history/evidence/erasure references |
 | B10 destinations | 13-field termContext; successful verification data; null-safe gloss check; rejection cardinality; no guessed actor or executed-content proof | Historical-purpose per-leaf matrices, exact snapshot/proof FKs, closed native-state catalog, all strict nested decoders |
 | B11 import | Tenant audit anchor, full-plan replay, create→schedule→terminal order | Exhaustive command payload codecs, locks/constraints and historical-head command integration |
 | B12 historical work | No false Done, invisible uncertainty or permanently stranded identity | Review/validate the companion matrix; historical leaf and collection-adoption integration; final product bucket |
@@ -393,7 +439,7 @@ Mandatory fixtures include:
 - All 13 keyword-context fields round-trip, including keep, duplicate terms, fractional ownRank, explicit null versus absent and empty array; unknown keys block before forgiving parse.
 - Ready gloss with either pin missing fails; successful verification keeps all three nullable/key-presence facts; typed before-fields preserve empty strings without field/value storage.
 - Same source with changed command/capture/mapping digest fails replay. New key cannot bypass changed source. Overlapping components serialize. Crashes leave either one whole component or none.
-- Schedule and reject on the same ticket use the correct ordered version chain. Historical-only decline/head and future same-ID adoption tests are required before accepting that branch.
+- Schedule and reject on the same ticket use the correct ordered version chain. Historical-only decline/head and same-ID adoption require open and qualified declined capture tests, stale boundary/read refusals, mode mismatches and explicit adoption-reference constraints before acceptance.
 - Deleted/completed claim with an unresolved sibling effect blocks historical materialization and source retirement. Historical source claims do not satisfy verified success or dependencies. Counts use one ticket and the same predicate as pagination.
 - Reused/empty group URLs remain resolvable; equal-time rejections never form a decision manifest; lost evidence does not invent erased status. Authorized history survives ordinary review disappearance without leaking across organizations.
 - User/asset/organization/shared-domain erasure follows explicit scope and immutable-fact exceptions; all old writers/report joins are converted before removal.
@@ -401,3 +447,5 @@ Mandatory fixtures include:
 These are **test requirements, not test results**. Only document integrity, preserved input/worktree fingerprints and public artifact validation are run in this pass. Final consolidated DDL/types, R2 provider codecs, real-role tests, concurrency/crash tests and migration rehearsal remain required.
 
 Implementation remains paused. Public documentation publication is authorized; no application change, migration, provider action, source retirement or production deployment is part of this pass.
+
+**Related work now tracked:** [Standing cap, month grouping and cleanup coordination](Fload-Inbox-R3-Parallel-Work-Coordination.md). These live changes affect the final admission/count predicate and the migration census; they do not authorize this task to repeat cleanup or regenerate reports.
