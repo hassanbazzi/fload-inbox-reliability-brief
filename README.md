@@ -1,5 +1,11 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: four product PRs merged; final-fixes review reconciled · 19 September 2026.** [Visual overview](ownership-overview.html#coordination-heading) · [Already merged versus remaining](Fload-Inbox-R3-Merged-Fixes-Resolution.md) · [Exact current predicate and retry contract](Fload-Inbox-R3-Parallel-Work-Coordination.md).
+
+Current main is e7c094c8; PRs1445–1448 are merged. Approved work no longer consumes the current cap, and the all/some-full toast is corrected. The plan now fixes deterministic-key capacity deferral and explicitly retains Fload-owned zero-slot visibility. Typed approved-with-client-action counting, atomic admission, exact re-check scope and post-merge dialog copy remain integration work. Documentation only; no platform changes or deployment performed here.
+
+---
+
 **Latest: final destination review reconciled · 19 September 2026.** [Visual explanation](ownership-overview.html#coordination-heading) · [D1–D5 disposition](Fload-Inbox-R3-Final-Review-Resolution.md) · [Admission contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
 
 The cap counts client-action obligations, independently of the unread `attention_version` counter. New blocker cards and human historical adoption follow admission; recovery and Undo remain available. Existing wait modes decide passive waiting, with stronger client obligations taking precedence. Source pins and hourly-refill wording are current. No platform code or final DDL changed.
