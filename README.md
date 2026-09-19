@@ -1,5 +1,11 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: destination follow-up and merged-work coordination · 19 September 2026.** [Visual walkthrough](ownership-overview.html#coordination-heading) · [C1–C6 disposition](Fload-Inbox-R3-Destination-Followup-Resolution.md) · [Exact admission/replacement contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical capture matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
+
+Product decision: five items needing client attention; approved passive waiting remains visible outside that count. Both parallel PRs are merged. Their current cap still permits concurrent overshoot, and blocker re-checks can select unrelated rows. The plan now specifies short atomic admission, exact replacement scope, hourly refills and separate channel announcements. Existing failures still surface above the attention cap; new suggestions pause. Historical declined capture requires independently recovered comparable evidence; captures do not create unread churn. Source columns are unchanged, but the writer/contract census must be refreshed. Documentation only; platform fixes and runtime validation remain ahead.
+
+---
+
 **Latest: destination v2 review follow-up · 19 September 2026.** [Visual overview](ownership-overview.html#destination-heading) · [Review disposition](Fload-Inbox-R3-Destination-v2-Review-Resolution.md) · [Current contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Parallel cap/UI/cleanup coordination](Fload-Inbox-R3-Parallel-Work-Coordination.md).
 
 Canonical baseline capture is allowed without reopening history; restore intent is explicit; adoption uses existing revision links. Source claims about archives and handoff writers are corrected. Standing-cap/month grouping changes and fresh-census requirements are recorded. These remain proposed contracts: no application change, final table count, migration or runtime proof is claimed.

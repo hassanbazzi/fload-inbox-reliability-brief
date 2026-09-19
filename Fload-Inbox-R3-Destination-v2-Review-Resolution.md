@@ -25,7 +25,7 @@ The new observation paths reuse carried refresh provenance and record_observatio
 
 ## Related work affects integration
 
-The supplied parallel conversation and inspected FLO-1437/FLO-1438 PRs change admission and presentation: five open tasks per app, weekly top-ups, earlier months collapsed and prerequisite-specific check labels. Those PRs were open at inspection, not verified deployed. The reported operational expiry is migration input, not a command for this task to repeat it.
+The supplied parallel conversation and inspected FLO-1437/FLO-1438 PRs change admission and presentation: five open tasks per app, weekly top-ups, earlier months collapsed and prerequisite-specific check labels. That first checkpoint inspected open PRs. Both have since merged; the [subsequent follow-up](Fload-Inbox-R3-Destination-Followup-Resolution.md) verifies two remaining admission gaps and updates exact source pins. Deployment is not verified. The reported operational expiry is migration input, not a command for this task to repeat it.
 
 The coordination note requires a single durable-work count/admission rule, atomic capacity checks, exact replacement deltas, recovery independent of suggestion capacity, and a fresh post-cleanup/report census. It omits private customer names and operational counts.
 
