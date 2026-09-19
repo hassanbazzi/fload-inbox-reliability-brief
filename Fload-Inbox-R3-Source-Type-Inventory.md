@@ -222,3 +222,47 @@ A current readback predicate is insufficient as the bridge: [reply-readback-targ
 
 Finally, preserve Apple's optional `appleReviewResourceId` separately. [reply-helpers.ts:482–519](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/worker/scraping/helpers/reply-helpers.ts#L482) resolves/caches an official API resource ID against the existing review. Do not switch the permanent review key to that value whenever it becomes known; new API-only producers require an explicit equivalent-identity rule before materialization.
 
+
+---
+
+## 8. Destination-review source additions
+
+### Keyword term context
+
+The exact source is [keyword-term-context.ts:45–172](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/packages/shared-types/src/contracts/keyword-term-context.ts#L45). It is a list of at most 120 structured items, not one explanation string per added/removed word.
+
+| Field | Source contract |
+|---|---|
+| term | required string, min length 1; original casing |
+| direction | required enum: add / remove / keep |
+| kind | required enum: own_brand / competitor_brand / misspelling / category / feature / use_case / audience / seasonal / generic / unknown |
+| correctedTo | string, nullable and optional |
+| demand | number, nullable and optional; no 0–100 restriction in the schema |
+| difficulty | number, nullable and optional; no 0–100 restriction in the schema |
+| ownRank | number, nullable and optional; not constrained to integer |
+| rankObservedOn | string, nullable and optional; the schema does **not** validate an ISO date |
+| coverage | enum title / subtitle / keywords / mixed / none / unknown, nullable and optional |
+| relevance | integer 1–5, nullable and optional |
+| offCategory | boolean, nullable and optional |
+| worthIt | boolean, nullable and optional |
+| rationale | required string, at most 90 graphemes; empty is not forbidden by this source schema |
+
+The item schema is a normal Zod object, not `.strict()`; migration must inspect original keys before parsing so unrecognized source properties are not silently stripped. The list has no uniqueness constraint. Preserve order and repeated terms.
+
+**Actual persistence:** [stage-refusal.ts:246–279](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/backlog/stage-refusal.ts#L246) reads the typed context under the stage intent; the writer persists `refusal.intent` inside the marker at [552–556](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/backlog/stage-refusal.ts#L552). The field also appears on ordinary keyword/prose action params, not only refusal cards: [stage-from-intent.ts:2005–2035](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/backlog/stage-from-intent.ts#L2005) and [2696–2725](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/backlog/stage-from-intent.ts#L2696).
+
+
+### Successful editable-release verification
+
+[agent-request-unblock.service.ts:1100–1110](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/agent-request-unblock.service.ts#L1100) writes `data: liveResult.editableVersion` on successful verification. [editable-release-preflight.ts:17–25,100–106](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/aso/editable-release-preflight.ts#L17) constructs exactly:
+
+| Source field | Declared type |
+|---|---|
+| versionId | string |
+| versionString | string \| null |
+| appStoreState | string \| null |
+
+The nullable value types come from [release-state.service.ts:56–59](https://github.com/fload-ai/fload-platform/blob/e2cc156994855e401a83399fbb4c3d7be5194875/apps/api/src/services/aso/release-state.service.ts#L56).
+
+
+The object is historical provider evidence, not a current baseline. [Corrected typed destination proposal](Fload-Inbox-R3-Destination-Contracts-v2.md) records presence, closed-state and historical-leaf gates.

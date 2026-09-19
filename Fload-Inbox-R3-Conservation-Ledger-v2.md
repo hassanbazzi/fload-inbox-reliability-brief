@@ -2,6 +2,8 @@
 
 19 September 2026 · v2 review follow-up applied · Documentation only · Implementation paused
 
+**New destination increment:** [Corrected contracts v2](Fload-Inbox-R3-Destination-Contracts-v2.md), [historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) and [review disposition](Fload-Inbox-R3-Destination-Review-Resolution.md) now specify the next proposed fields and transitions. They do not close B9–B13 or supersede this ledger’s conservation gates before their matrices, codecs and tests are accepted.
+
 **What this is.** A column-complete **mapping proposal**, corrected against the current writer census and accepted ownership/R2–R3 rules. All 212 declared source columns are named. This is not yet a value-complete typed destination schema: known nested-field, identity, command-attribution and historical-state gaps are explicitly blocked below. The proposed history relation count is not accepted by this ledger.
 
 **Source contract appendix:** [Latest review disposition](Fload-Inbox-R3-v2-Review-Resolution.md). [Exact localization, verification, handoff and provider field types](Fload-Inbox-R3-Source-Type-Inventory.md).

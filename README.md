@@ -1,5 +1,12 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: destination contracts v2 · 19 September 2026.** [Visual summary](ownership-overview.html#destination-heading) · [Corrected concrete contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Review corrections](Fload-Inbox-R3-Destination-Review-Resolution.md).
+
+Provider aliases stay outside Core; repeated rejections, exact content and actor provenance are preserved; replay and schedule ordering are corrected. All 13 keyword-context fields and the successful release-verification shape are mapped. The new companion proposes safe same-ID historical→fresh-work transitions using existing commands. B9–B13, consolidated DDL, data rehearsal and runtime proof remain open. Implementation is paused; no final table count is approved.
+
+---
+
+
 **Latest: R3 ledger v2 review follow-up · 19 September 2026.** [Review disposition](Fload-Inbox-R3-v2-Review-Resolution.md) · [Current ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Visual walkthrough](ownership-overview.html#conservation-heading) · [Source types and identity evidence](Fload-Inbox-R3-Source-Type-Inventory.md).
 
 The independent review confirms the eight main corrections. Explicit review-sync fencing, missing-card holds, pin mismatch handling, partial policy blocking and per-store identity rules are now included. Correlation-based transaction proof and historical manual-authorship reopening were not adopted. Next: concrete destination contracts for B9–B13; no final schema/table count or runtime proof is claimed. Implementation remains paused.
