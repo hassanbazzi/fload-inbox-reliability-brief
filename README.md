@@ -1,5 +1,11 @@
 # Fload inbox reliability — architecture review packet
 
+**Latest: final destination review reconciled · 19 September 2026.** [Visual explanation](ownership-overview.html#coordination-heading) · [D1–D5 disposition](Fload-Inbox-R3-Final-Review-Resolution.md) · [Admission contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
+
+The cap counts client-action obligations, independently of the unread `attention_version` counter. New blocker cards and human historical adoption follow admission; recovery and Undo remain available. Existing wait modes decide passive waiting, with stronger client obligations taking precedence. Source pins and hourly-refill wording are current. No platform code or final DDL changed.
+
+---
+
 **Latest: destination follow-up and merged-work coordination · 19 September 2026.** [Visual walkthrough](ownership-overview.html#coordination-heading) · [C1–C6 disposition](Fload-Inbox-R3-Destination-Followup-Resolution.md) · [Exact admission/replacement contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical capture matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
 
 Product decision: five items needing client attention; approved passive waiting remains visible outside that count. Both parallel PRs are merged. Their current cap still permits concurrent overshoot, and blocker re-checks can select unrelated rows. The plan now specifies short atomic admission, exact replacement scope, hourly refills and separate channel announcements. Existing failures still surface above the attention cap; new suggestions pause. Historical declined capture requires independently recovered comparable evidence; captures do not create unread churn. Source columns are unchanged, but the writer/contract census must be refreshed. Documentation only; platform fixes and runtime validation remain ahead.
