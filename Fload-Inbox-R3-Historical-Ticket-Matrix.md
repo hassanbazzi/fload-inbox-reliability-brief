@@ -1,5 +1,8 @@
 # Proposed narrow history-ticket matrix for R3
 
+
+**20 September E4 integration:** [E4 revision 4.2](Fload-Inbox-R3-E4-Variant-Child-Codec.md) adds a conservative request leaf/reference mapping, not automatic historical approval or successor authority. Its request collection parent still needs G1's exact prose/sealing contract. Unequal repaired outcomes remain G2-blocked. Historical disposition cannot erase an unfinished accepted obligation merely because old workers were fenced; §8 of the conservation ledger requires positive disposition. Collection adoption remains gated by this matrix. [Reconciliation](Fload-Inbox-R3-E4-Reconciliation.md).
+
 19 September 2026. M1–M3 / L1–L6 follow-up applied; subsequent C4/C5 proof and `attention_version` qualifications and final-review D1–D4 admission clarifications and deterministic-producer deferral applied. Companion proposal to destination contracts v2; not an accepted schema amendment or implementation claim. No code, tests, migrations or provider calls. It specifies the proposed **ticket/head/command** branch for source facts that already have an accepted closed historical content shape; unresolved content, target, membership and effect proofs remain explicitly gated below.
 
 ## Why use revise, not reopen

@@ -1,45 +1,50 @@
 # Fload inbox reliability — architecture review packet
 
-**Latest: four product PRs merged; final-fixes review reconciled · 19 September 2026.** [Visual overview](ownership-overview.html#coordination-heading) · [Already merged versus remaining](Fload-Inbox-R3-Merged-Fixes-Resolution.md) · [Exact current predicate and retry contract](Fload-Inbox-R3-Parallel-Work-Coordination.md).
+**Current checkpoint · 20 September 2026:** parallel E4 work reconciled as revision 4.2. Keep the conservative reference mapping; close parent-note sealing and unequal-outcome conservation. Diagnostic summaries stay derived. [Visual update](ownership-overview.html#e4-heading) · [Drift assessment](Fload-Inbox-R3-E4-Reconciliation.md) · [Exact E4 mapping](Fload-Inbox-R3-E4-Variant-Child-Codec.md) · [What remains before implementation](Fload-Inbox-Implementation-Readiness.md).
+
+Implementation remains paused. The schema-and-command build contract is the next deliverable; runtime and migration proofs are not claimed complete.
+
+
+**Earlier checkpoint: four product PRs merged; final-fixes review reconciled · 19 September 2026.** [Visual overview](ownership-overview.html#coordination-heading) · [Already merged versus remaining](Fload-Inbox-R3-Merged-Fixes-Resolution.md) · [Exact current predicate and retry contract](Fload-Inbox-R3-Parallel-Work-Coordination.md).
 
 Current main is e7c094c8; PRs1445–1448 are merged. Approved work no longer consumes the current cap, and the all/some-full toast is corrected. The plan now fixes deterministic-key capacity deferral and explicitly retains Fload-owned zero-slot visibility. Typed approved-with-client-action counting, atomic admission, exact re-check scope and post-merge dialog copy remain integration work. Documentation only; no platform changes or deployment performed here.
 
 ---
 
-**Latest: final destination review reconciled · 19 September 2026.** [Visual explanation](ownership-overview.html#coordination-heading) · [D1–D5 disposition](Fload-Inbox-R3-Final-Review-Resolution.md) · [Admission contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
+**Earlier checkpoint: final destination review reconciled · 19 September 2026.** [Visual explanation](ownership-overview.html#coordination-heading) · [D1–D5 disposition](Fload-Inbox-R3-Final-Review-Resolution.md) · [Admission contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
 
 The cap counts client-action obligations, independently of the unread `attention_version` counter. New blocker cards and human historical adoption follow admission; recovery and Undo remain available. Existing wait modes decide passive waiting, with stronger client obligations taking precedence. Source pins and hourly-refill wording are current. No platform code or final DDL changed.
 
 ---
 
-**Latest: destination follow-up and merged-work coordination · 19 September 2026.** [Visual walkthrough](ownership-overview.html#coordination-heading) · [C1–C6 disposition](Fload-Inbox-R3-Destination-Followup-Resolution.md) · [Exact admission/replacement contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical capture matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
+**Earlier checkpoint: destination follow-up and merged-work coordination · 19 September 2026.** [Visual walkthrough](ownership-overview.html#coordination-heading) · [C1–C6 disposition](Fload-Inbox-R3-Destination-Followup-Resolution.md) · [Exact admission/replacement contract](Fload-Inbox-R3-Parallel-Work-Coordination.md) · [Historical capture matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md).
 
 Product decision: five items needing client attention; approved passive waiting remains visible outside that count. Both parallel PRs are merged. Their current cap still permits concurrent overshoot, and blocker re-checks can select unrelated rows. The plan now specifies short atomic admission, exact replacement scope, hourly refills and separate channel announcements. Existing failures still surface above the attention cap; new suggestions pause. Historical declined capture requires independently recovered comparable evidence; captures do not create unread churn. Source columns are unchanged, but the writer/contract census must be refreshed. Documentation only; platform fixes and runtime validation remain ahead.
 
 ---
 
-**Latest: destination v2 review follow-up · 19 September 2026.** [Visual overview](ownership-overview.html#destination-heading) · [Review disposition](Fload-Inbox-R3-Destination-v2-Review-Resolution.md) · [Current contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Parallel cap/UI/cleanup coordination](Fload-Inbox-R3-Parallel-Work-Coordination.md).
+**Earlier checkpoint: destination v2 review follow-up · 19 September 2026.** [Visual overview](ownership-overview.html#destination-heading) · [Review disposition](Fload-Inbox-R3-Destination-v2-Review-Resolution.md) · [Current contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Parallel cap/UI/cleanup coordination](Fload-Inbox-R3-Parallel-Work-Coordination.md).
 
 Canonical baseline capture is allowed without reopening history; restore intent is explicit; adoption uses existing revision links. Source claims about archives and handoff writers are corrected. Standing-cap/month grouping changes and fresh-census requirements are recorded. These remain proposed contracts: no application change, final table count, migration or runtime proof is claimed.
 
 ---
 
 
-**Latest: destination contracts v2 · 19 September 2026.** [Visual summary](ownership-overview.html#destination-heading) · [Corrected concrete contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Review corrections](Fload-Inbox-R3-Destination-Review-Resolution.md).
+**Earlier checkpoint: destination contracts v2 · 19 September 2026.** [Visual summary](ownership-overview.html#destination-heading) · [Corrected concrete contracts](Fload-Inbox-R3-Destination-Contracts-v2.md) · [Historical-ticket matrix](Fload-Inbox-R3-Historical-Ticket-Matrix.md) · [Review corrections](Fload-Inbox-R3-Destination-Review-Resolution.md).
 
 Provider aliases stay outside Core; repeated rejections, exact content and actor provenance are preserved; replay and schedule ordering are corrected. All 13 keyword-context fields and the successful release-verification shape are mapped. The new companion proposes safe same-ID historical→fresh-work transitions using existing commands. B9–B13, consolidated DDL, data rehearsal and runtime proof remain open. Implementation is paused; no final table count is approved.
 
 ---
 
 
-**Latest: R3 ledger v2 review follow-up · 19 September 2026.** [Review disposition](Fload-Inbox-R3-v2-Review-Resolution.md) · [Current ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Visual walkthrough](ownership-overview.html#conservation-heading) · [Source types and identity evidence](Fload-Inbox-R3-Source-Type-Inventory.md).
+**Earlier checkpoint: R3 ledger v2 review follow-up · 19 September 2026.** [Review disposition](Fload-Inbox-R3-v2-Review-Resolution.md) · [Current ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Visual walkthrough](ownership-overview.html#conservation-heading) · [Source types and identity evidence](Fload-Inbox-R3-Source-Type-Inventory.md).
 
 The independent review confirms the eight main corrections. Explicit review-sync fencing, missing-card holds, pin mismatch handling, partial policy blocking and per-store identity rules are now included. Correlation-based transaction proof and historical manual-authorship reopening were not adopted. Next: concrete destination contracts for B9–B13; no final schema/table count or runtime proof is claimed. Implementation remains paused.
 
 ---
 
 
-**Latest: R3 conservation ledger corrected · 19 September 2026.** [Visual walkthrough](ownership-overview.html#conservation-heading) · [Corrected 212-column ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Actual source types](Fload-Inbox-R3-Source-Type-Inventory.md) · [What changed and what remains](Fload-Inbox-R3-Ledger-Review-Resolution.md).
+**Earlier checkpoint: R3 conservation ledger corrected · 19 September 2026.** [Visual walkthrough](ownership-overview.html#conservation-heading) · [Corrected 212-column ledger](Fload-Inbox-R3-Conservation-Ledger-v2.md) · [Actual source types](Fload-Inbox-R3-Source-Type-Inventory.md) · [What changed and what remains](Fload-Inbox-R3-Ledger-Review-Resolution.md).
 
 All 212 source column names are covered; exact destination schemas and migration proof remain open. Evidence, actors, retry, aliases, personal notes, localization facts, suppression and domain-retirement rules have been corrected. No final table count is approved. Ownership v6 remains accepted; platform implementation is paused.
 
@@ -48,12 +53,12 @@ All 212 source column names are covered; exact destination schemas and migration
 ## Previous checkpoints
 
 
-**Latest: R2/R3 v2 review confirmed · six clarifications applied.** [Review disposition and next deliverable](Fload-Inbox-R2-R3-v2-Review-Resolution.md) · [Current v2](Fload-Inbox-R2-R3-Schema-Design-v2.md) · [Visual overview](ownership-overview.html). Next: the field/relationship conservation ledger. Ownership v6 stays accepted; full codecs, destination schemas, DDL and migration proof remain open. Implementation is paused.
+**Earlier checkpoint: R2/R3 v2 review confirmed · six clarifications applied.** [Review disposition and next deliverable](Fload-Inbox-R2-R3-v2-Review-Resolution.md) · [Current v2](Fload-Inbox-R2-R3-Schema-Design-v2.md) · [Visual overview](ownership-overview.html). Next: the field/relationship conservation ledger. Ownership v6 stays accepted; full codecs, destination schemas, DDL and migration proof remain open. Implementation is paused.
 
-**Latest: R2/R3 corrected draft · 18 September 2026.** [Visual summary](ownership-overview.html) · [Corrected evidence and migration rules](Fload-Inbox-R2-R3-Schema-Design-v2.md) · [All 212 source fields](Fload-Inbox-R3-Source-Fields.md) · [Review findings and corrections](Fload-Inbox-R2-R3-Review-Resolution.md). Ownership v6 remains accepted. Exact destination mappings, codecs, consolidated DDL and runtime/migration proof remain open; implementation is paused.
+**Earlier checkpoint: R2/R3 corrected draft · 18 September 2026.** [Visual summary](ownership-overview.html) · [Corrected evidence and migration rules](Fload-Inbox-R2-R3-Schema-Design-v2.md) · [All 212 source fields](Fload-Inbox-R3-Source-Fields.md) · [Review findings and corrections](Fload-Inbox-R2-R3-Review-Resolution.md). Ownership v6 remains accepted. Exact destination mappings, codecs, consolidated DDL and runtime/migration proof remain open; implementation is paused.
 
 
-**Latest: ownership review resolved · v6 · 18 September 2026.** [Open the new visual comparison](https://hassanbazzi.github.io/fload-inbox-reliability-brief/ownership-overview.html): original inbox or v15 → new ownership design, clickable module map, selected concrete fields and three lifecycle walkthroughs. [Detailed v6 proposal](Fload-Inbox-Ownership-Design-v6.md) · [Review closure and remaining work](Fload-Inbox-Ownership-v6-Review-Closure.md).
+**Earlier checkpoint: ownership review resolved · v6 · 18 September 2026.** [Open the new visual comparison](https://hassanbazzi.github.io/fload-inbox-reliability-brief/ownership-overview.html): original inbox or v15 → new ownership design, clickable module map, selected concrete fields and three lifecycle walkthroughs. [Detailed v6 proposal](Fload-Inbox-Ownership-Design-v6.md) · [Review closure and remaining work](Fload-Inbox-Ownership-v6-Review-Closure.md).
 
 The independent v6 review closes N1–N4 and C1–C4 with no actionable findings. V6 remains the ownership design; no new numbered draft is needed for this status update.
 

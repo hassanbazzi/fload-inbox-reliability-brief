@@ -202,6 +202,9 @@ Writers: 27 real insert sites (census; two were missing from the handover list: 
 
 ### 4.2 `agent_request` (30 columns; `schema.ts:4840–4953`)
 
+**20 September E4 companion:** [revision 4.2](Fload-Inbox-R3-E4-Variant-Child-Codec.md) specifies current/event/back-pointer occurrences, exact imported snapshots and conservative request-child identities. Output references do not prove authorship or current authorization. The `proposedOutcome` equality-only retirement rule below remains in force: unequal repaired shapes need an explicit lossless closed codec and are blocked until then (G2). Request-level prose needs one valid parent/history owner and collection sealing contract (G1). Preserve original evidence once; compute diagnostic flags as typed read projections (G4). The positive obligation gate in §8 precedes historical disposition (G3). Earlier speculative source-link/class mappings do not authorize an E4 union or inferred successor.
+
+
 Writers: one insert (`agent-request.service.ts:259`), one canonical lifecycle updater (`drizzle-agent-request-repository.ts:31–93`), and the unblock, dedupe, repair and experiment-link updaters (census §1). Only two `evidence` shapes exist (`listing_change`, `locale_expansion`); `blocked` rows have empty evidence/outcome and a `blockerContext {platform, locale, field, …}`.
 
 | Column | Type · null | Disp. | Destination and rule |

@@ -95,6 +95,9 @@ Immutable once admitted; tenant/action erasure removes the scoped association. O
 
 ### 1.4 Edge classification, canonical keys and closure
 
+**20 September E4 reconciliation:** [E4 revision 4.2](Fload-Inbox-R3-E4-Variant-Child-Codec.md) now supplies the source-variant, child-key and reference codec. For inventoried legacy E4 rows, request children and listing outputs remain distinct; recorded IDs support exact reference navigation, not same-work union, generation authorship or an automatic successor. That bounded rule supersedes the speculative E4a handoff/class language below where no stronger proof exists. Provider alias gates are unchanged. G1 parent-note sealing and G2 unequal-outcome preservation remain explicit design gates; G3 requires positive obligation disposition; G4 keeps diagnostic summaries derived. [Full reconciliation](Fload-Inbox-R3-E4-Reconciliation.md).
+
+
 Compute typed relationships and same-work equivalence classes **before** assigning keys. A referenced card is not automatically the same work as its request. A linked blocked request is not automatically a dependency. E4 is classified using the exact request variant, immutable output/intent, domain scope, locale/store and retained handoff evidence.
 
 | Edge | Class / representation | Admission rule |
@@ -113,7 +116,7 @@ Compute typed relationships and same-work equivalence classes **before** assigni
 
 Canonical identity precedence within a **proved equivalence class**: review tuple; otherwise proved request/child lineage anchor; otherwise the exact retained pending-card anchor; otherwise backlog/request singleton. A proven existing permanent target always wins. Do not compute a card-derived key for E1 and an incompatible request-derived key for E4 and then reject a normal handoff. All class members receive the one selected key and aliases. Conflicting semantic identities still block; precedence cannot merge different intents or provider targets.
 
-Child anchors require the full domain discriminator (store, locale and intent/role as applicable), not locale alone. The exhaustive E4 source-variant matrix and byte codec remain B9 design work; ambiguous variants stay blocked. No newly inferred child becomes approval-time membership.
+Child anchors require the full domain discriminator (store, locale and intent/role as applicable), not locale alone. The E4 source-variant matrix and byte codec are now specified by revision 4.2; its remaining schema gates and ambiguous variants stay blocked. No newly inferred child becomes approval-time membership.
 
 
 #### E4 source variants checked in this follow-up
@@ -122,7 +125,7 @@ Child anchors require the full domain discriminator (store, locale and intent/ro
 |---|---|---|
 | listing_change hypothesis | listing-change-hypothesis.ts:110–155; aso-agent.ts:1185–1187 writes **both** pendingActionId=applyCardId and recommendationIds=[applyCardId] | Request/package and card may share a proved class; derive per-locale child intent only from exact retained content. The review's claim that this pendingActionId writer is unidentified is incorrect |
 | locale_expansion hypothesis | locale-hypothesis.ts:199–224 stores returned card references; aso-agent.ts:464–477 passes hypothesisRequestId to locale staging | Returned IDs are references, not proof of N newly created drafts or approval-time membership |
-| Locale output variants | locale-expansion.ts:2012–2038 uses action=create_locale with localeClass=create/update/repair and a reused asset/locale card ID; :2087–2135 can retain a protected human-edited row while discarding newly generated copy | Do not force intent=create, attribute unchanged copy to this generation, or mint a request-derived identity for an already proved target. Preserve exact locale class and historical request/card references |
+| Locale output variants | locale-expansion.ts:2012–2038 uses action=create_locale with localeClass=new/update/repair (mapped intent create/update/repair) and a reused asset/locale card ID; :2087–2135 can retain a protected human-edited row while discarding newly generated copy | Do not force intent=create, attribute unchanged copy to this generation, or mint a request-derived identity for an already proved target. Preserve exact locale class and historical request/card references |
 | blocked request | aso-agent-request-blockers.ts:102–124 creates no pendingActionId link itself | Distinct work; admit a neutral dependency only with retained same-tenant relationship and readiness proof |
 
 The illustrative new-child anchor uses organization + stable lineage anchor + store + locale + domain role, encoded as an explicit LP tuple. Mutable create/update/repair intent is revision content, not a reason to re-key permanent work. A proved existing target takes precedence. Reused IDs and missing original content cannot manufacture a generation handoff revision. The remaining E4 work is strict variant/relationship decoding and conflict/partial-output fixtures, not rediscovering the already identified completion writer.
@@ -160,6 +163,9 @@ Each row: destination, SQL type/nullability, closed values, determinant/cardinal
 | Decoder | `LocaleDemandSignal` keys ⊆ {downloads,revenueUsd,impressions,pageViews,reviewCount}; `CompetitorMarketSignal` keys ⊆ {strength,localizedCompetitorCount,topChartCount,estMarketDownloads,topCompetitors}; all numbers finite | | |
 
 ### 2.3 Promise wording and blocked guide steps
+
+**E4 parent-note gate G1:** the proposed notes destination below is not permission to attach agent content to a generic collection proposal. Ownership v6 forbids that shape. Choose one typed parent-prose owner and integrate its closed sealing/read/erasure matrix before enabling that attachment; preserve source arrays and block unsupported components meanwhile. Directed supporting evidence already has a history mapping; do not create a second independent authoritative copy or duplicate request notes onto all locale children.
+
 
 | Source fact | Destination | Rule |
 |---|---|---|
@@ -425,7 +431,7 @@ No impact/risk mirror is added to Core. No new JSONB, EAV, serialized object tex
 
 | Gate | What is now concrete | Still needed before closure |
 |---|---|---|
-| B9 identity/edges | Core/provider alias boundary; tuple collision rule; E14 closure; no automatic request-kind union | Finish E4 strict variant/child codec from the now traced writers; prove ASC association and Play scope/history/evidence/erasure references |
+| B9 identity/edges | Core/provider alias boundary; tuple collision rule; E14 closure; no automatic request-kind union | E4 reference/child codec specified in revision 4.2; finish G1/G2 schema integration and fixtures; prove ASC association and Play scope/history/evidence/erasure references |
 | B10 destinations | 13-field termContext; successful verification data; null-safe gloss check; rejection cardinality; no guessed actor or executed-content proof | Historical-purpose per-leaf matrices, exact snapshot/proof FKs, closed native-state catalog, all strict nested decoders |
 | B11 import | Tenant audit anchor, full-plan replay, create→schedule→terminal order | Exhaustive command payload codecs, locks/constraints and historical-head command integration |
 | B12 historical work | No false Done, invisible uncertainty or permanently stranded identity | Review/validate the companion matrix; historical leaf and collection-adoption integration; final product bucket |
