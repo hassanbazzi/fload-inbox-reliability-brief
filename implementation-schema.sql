@@ -4164,3 +4164,79 @@ BEGIN
   PERFORM set_config('lock_timeout',previous_lock_timeout,true);
 END;
 $retained_evidence_indexes$;
+
+-- 0167_panoramic_starhawk.sql
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_cycle_shape";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_cycle_shape" CHECK (CASE
+        WHEN "actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NULL THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND "actions"."command"."progress_execution_id" IS NOT NULL AND "actions"."command"."progress_step_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
+          AND CASE "actions"."command"."kind"
+            WHEN 'open_recovery' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NULL
+            WHEN 'reconcile' THEN "actions"."command"."principal_kind" IN ('user','api_key') AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            WHEN 'resume_hold' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            ELSE false END
+          AND CASE "actions"."command"."cycle_purpose"
+            WHEN 'binding' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'prewrite' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NOT NULL
+            WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            ELSE false END
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_execution_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        END);
+--> statement-breakpoint
+CREATE FUNCTION actions.guard_unissued_resume() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; ap actions.approval; ticket actions.action;
+BEGIN
+  IF NEW.kind<>'reconcile' OR NEW.outcome<>'accepted' OR NEW.cycle_purpose IS NOT NULL THEN RETURN NEW; END IF;
+  SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.progress_execution_id FOR UPDATE;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=NEW.organization_id AND id=e.approval_id;
+  SELECT * INTO ticket FROM actions.action WHERE organization_id=NEW.organization_id AND id=ap.action_id;
+  IF e.id IS NULL OR ap.id IS NULL OR ticket.id IS NULL
+    OR ticket.record_kind IS DISTINCT FROM 'work' OR ticket.decision IS DISTINCT FROM 'approved'
+    OR ticket.current_approval_id IS DISTINCT FROM ap.id OR ticket.current_revision_id IS DISTINCT FROM ap.revision_id
+    OR e.phase IS DISTINCT FROM 'blocked' OR e.next_run_at IS NOT NULL OR e.writes_closed_at IS NOT NULL
+    OR e.claim_token IS NOT NULL OR e.claim_expires_at IS NOT NULL
+    OR e.next_step_id IS DISTINCT FROM NEW.progress_step_id
+    OR NOT EXISTS(SELECT 1 FROM actions.execution_step s WHERE s.organization_id=NEW.organization_id AND s.execution_id=e.id AND s.id=NEW.progress_step_id AND s.content_revision_id=ap.revision_id)
+    OR EXISTS(SELECT 1 FROM actions.execution_attempt a WHERE a.organization_id=NEW.organization_id AND a.execution_id=e.id)
+    OR EXISTS(SELECT 1 FROM actions.command c WHERE c.organization_id=NEW.organization_id AND c.progress_execution_id=e.id AND c.outcome='accepted' AND c.cycle_purpose IS NOT NULL)
+  THEN RAISE EXCEPTION 'Cycleless resume requires an exact stopped approved obligation with no admitted interaction or cycle' USING ERRCODE='23514'; END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER command_unissued_resume BEFORE INSERT ON actions.command FOR EACH ROW EXECUTE FUNCTION actions.guard_unissued_resume();
+--> statement-breakpoint
+CREATE FUNCTION actions.check_unissued_resume_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; ap actions.approval; target actions.command_target;
+BEGIN
+  IF NEW.kind<>'reconcile' OR NEW.outcome<>'accepted' OR NEW.cycle_purpose IS NOT NULL THEN RETURN NULL; END IF;
+  SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.progress_execution_id;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=NEW.organization_id AND id=e.approval_id;
+  SELECT * INTO target FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=NEW.id AND action_id=ap.action_id;
+  IF e.id IS NULL OR ap.id IS NULL OR target.action_id IS NULL
+    OR (SELECT count(*) FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=NEW.id)<>1
+    OR target.expected_version IS NULL OR target.expected_revision_id IS DISTINCT FROM ap.revision_id
+    OR target.previous_approval_id IS DISTINCT FROM ap.id OR target.result_approval_id IS DISTINCT FROM ap.id
+    OR target.previous_revision_id IS DISTINCT FROM ap.revision_id OR target.result_revision_id IS DISTINCT FROM ap.revision_id
+    OR target.previous_decision IS DISTINCT FROM 'approved' OR target.result_decision IS DISTINCT FROM 'approved'
+    OR e.phase IS DISTINCT FROM 'ready' OR e.next_step_id IS DISTINCT FROM NEW.progress_step_id
+    OR e.next_run_at IS DISTINCT FROM greatest(NEW.accepted_at,ap.undo_deadline,coalesce(target.result_scheduled_for,NEW.accepted_at))
+    OR e.current_progress_command_id IS NOT NULL OR e.writes_closed_at IS NOT NULL
+    OR EXISTS(SELECT 1 FROM actions.execution_attempt a WHERE a.organization_id=NEW.organization_id AND a.execution_id=e.id)
+    OR EXISTS(SELECT 1 FROM actions.command c WHERE c.organization_id=NEW.organization_id AND c.progress_execution_id=e.id AND c.outcome='accepted' AND c.cycle_purpose IS NOT NULL)
+  THEN RAISE EXCEPTION 'Cycleless resume must retain its exact target and due obligation without opening a cycle or attempt' USING ERRCODE='23514'; END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER command_unissued_resume_commit AFTER INSERT ON actions.command DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_unissued_resume_commit();

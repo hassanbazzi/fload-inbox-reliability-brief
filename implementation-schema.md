@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0166: 21 relations, 355 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0167: 21 relations, 355 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -157,6 +157,10 @@ command_planned_step_scope: (organization_id, progress_execution_id, cycle_plann
 command_cycle_predecessor_scope: (organization_id, cycle_predecessor_command_id) → actions.command (organization_id, id)
 command_instant_bounds: ("actions"."command"."accepted_at" IS NULL OR "actions"."command"."accepted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_anchor_at" IS NULL OR "actions"."command"."cycle_anchor_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_decisive_after_at" IS NULL OR "actions"."command"."cycle_decisive_after_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_next_run_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
 command_cycle_shape: CASE
+        WHEN "actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NULL THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND "actions"."command"."progress_execution_id" IS NOT NULL AND "actions"."command"."progress_step_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
           num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
           AND CASE "actions"."command"."kind"
