@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0160: 21 relations, 345 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0161: 21 relations, 353 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -94,12 +94,12 @@ revision_not_own_source: "actions"."revision"."id" IS DISTINCT FROM "actions"."r
 
 ## `actions.command`
 
-Who asked for what, when it was accepted, and the immutable recovery-cycle scope.
+Who asked for what, when it was accepted, the immutable recovery-cycle scope and exact accepted execution-progress history.
 
 | Field | SQL type / enum | Nullable | Key / default |
 | --- | --- | --- | --- |
 | `id` | text | No | PK |
-| `organization_id` | text | No | FK → public.organization.id; FK → actions.execution.organization_id; FK → actions.execution_step.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id |
+| `organization_id` | text | No | FK → public.organization.id; FK → actions.command.organization_id; FK → actions.execution.organization_id; FK → actions.execution_step.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id |
 | `idempotency_key` | uuid | No | — |
 | `principal_kind` | principal_kind: user, api_key, agent, policy, system | No | — |
 | `actor_user_id` | text | Yes | FK → public.user.id |
@@ -118,9 +118,16 @@ Who asked for what, when it was accepted, and the immutable recovery-cycle scope
 | `outcome` | command_outcome: accepted, conflict, refused | No | — |
 | `error` | command_error: not_found, stale_version, stale_revision, stale_membership, invalid_transition, undo_expired, execution_started, unresolved_write, permission_changed, billing_required, unsupported_operation, idempotency_mismatch, target_changed, incomplete_revision, client_attention_capacity | Yes | — |
 | `message` | text | Yes | — |
-| `progress_execution_id` | text | Yes | FK → actions.execution.id; FK → actions.execution_step.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_step.execution_id |
+| `progress_execution_id` | text | Yes | FK → actions.command.progress_execution_id; FK → actions.execution.id; FK → actions.execution_step.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_step.execution_id |
 | `progress_step_id` | text | Yes | FK → actions.execution_step.id; FK → actions.execution_attempt.step_id |
 | `progress_subject_attempt_id` | text | Yes | FK → actions.execution_attempt.id |
+| `progress_phase` | execution_phase: ready, claimed, verification_due, uncertain, blocked, settled, cancelled | Yes | — |
+| `progress_result` | execution_result: generated, verified_live, verified_editable, handled_externally, acknowledged_only, failed, cancelled | Yes | — |
+| `progress_hold_reason` | execution_hold_reason: permission, billing, resource_busy, target_changed, uncertain_write, retry_exhausted, unsupported_readback, generation_conflict, awaiting_release, awaiting_publication, plan_incomplete, evidence_conflict | Yes | — |
+| `progress_resolution_owner` | execution_resolution_owner: client, fload, provider | Yes | — |
+| `progress_exhaustion_reason` | execution_exhaustion_reason: binding_observation_budget, prewrite_observation_budget, readback_observation_budget, effect_attempt_budget, effect_permanent_rejection, effect_retry_not_authorized | Yes | — |
+| `progress_next_run_at` | timestamp with time zone | Yes | — |
+| `progress_cycle_command_id` | text | Yes | FK → actions.command.id |
 | `cycle_purpose` | cycle_purpose: binding, prewrite, readback, cleanup | Yes | — |
 | `cycle_planned_step_id` | text | Yes | FK → actions.execution_step.id |
 | `cycle_predecessor_command_id` | text | Yes | FK → actions.command.id |
@@ -133,6 +140,7 @@ Who asked for what, when it was accepted, and the immutable recovery-cycle scope
 execution_cycle_successor: UNIQUE INDEX (organization_id ASC, cycle_predecessor_command_id ASC) WHERE "actions"."command"."kind" IN ('reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
 execution_attempt_completion_command: UNIQUE INDEX (organization_id ASC, progress_subject_attempt_id ASC) WHERE "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted'
 command_history_page: INDEX (organization_id ASC, accepted_at DESC, "id" COLLATE "C" DESC ASC)
+command_execution_identity: UNIQUE (organization_id, progress_execution_id, id)
 command_execution_step_identity: UNIQUE (organization_id, progress_execution_id, progress_step_id, id)
 command_tenant_identity: UNIQUE (organization_id, id)
 command_replay_identity: UNIQUE (organization_id, principal_kind, actor_subject_snapshot, idempotency_key)
@@ -141,12 +149,13 @@ command_actor_user_id_user_id_fk: (actor_user_id) → public.user (id)
 command_actor_acting_for_user_id_user_id_fk: (actor_acting_for_user_id) → public.user (id)
 command_actor_api_key_id_api_key_id_fk: (actor_api_key_id) → public.api_key (id)
 command_cycle_contract_id_operation_contract_id_fk: (cycle_contract_id) → composition.operation_contract (id)
+command_progress_cycle_scope: (organization_id, progress_execution_id, progress_cycle_command_id) → actions.command (organization_id, progress_execution_id, id)
 command_execution_scope: (organization_id, progress_execution_id) → actions.execution (organization_id, id)
 command_step_scope: (organization_id, progress_execution_id, progress_step_id) → actions.execution_step (organization_id, execution_id, id)
 command_subject_scope: (organization_id, progress_execution_id, progress_step_id, progress_subject_attempt_id) → actions.execution_attempt (organization_id, execution_id, step_id, id)
 command_planned_step_scope: (organization_id, progress_execution_id, cycle_planned_step_id) → actions.execution_step (organization_id, execution_id, id)
 command_cycle_predecessor_scope: (organization_id, cycle_predecessor_command_id) → actions.command (organization_id, id)
-command_instant_bounds: ("actions"."command"."accepted_at" IS NULL OR "actions"."command"."accepted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_anchor_at" IS NULL OR "actions"."command"."cycle_anchor_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_decisive_after_at" IS NULL OR "actions"."command"."cycle_decisive_after_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+command_instant_bounds: ("actions"."command"."accepted_at" IS NULL OR "actions"."command"."accepted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_anchor_at" IS NULL OR "actions"."command"."cycle_anchor_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_decisive_after_at" IS NULL OR "actions"."command"."cycle_decisive_after_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_next_run_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
 command_cycle_shape: CASE
         WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
           num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
@@ -161,12 +170,39 @@ command_cycle_shape: CASE
             WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             ELSE false END
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_execution_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
           num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
           AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
           AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         END
+command_progress_snapshot_shape: (CASE
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND "actions"."command"."progress_phase" IS NOT NULL AND "actions"."command"."progress_phase" IN ('verification_due','uncertain','blocked','settled')
+          AND ("actions"."command"."progress_phase" = 'settled') = ("actions"."command"."progress_result" IS NOT NULL)
+          AND "actions"."command"."progress_result" IS DISTINCT FROM 'cancelled'
+          AND ("actions"."command"."progress_phase" IN ('blocked','uncertain')) = ("actions"."command"."progress_hold_reason" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" <> 'uncertain' OR "actions"."command"."progress_hold_reason" IS NOT DISTINCT FROM 'uncertain_write')
+          AND ("actions"."command"."progress_phase" IN ('blocked','uncertain') OR ("actions"."command"."progress_phase" = 'settled' AND "actions"."command"."progress_result" IS NOT DISTINCT FROM 'failed')) = ("actions"."command"."progress_resolution_owner" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" NOT IN ('verification_due','uncertain') OR "actions"."command"."progress_next_run_at" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" <> 'settled' OR "actions"."command"."progress_next_run_at" IS NULL)
+          AND ("actions"."command"."progress_phase" <> 'blocked' OR "actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_hold_reason" IN ('awaiting_release','awaiting_publication','resource_busy','evidence_conflict'))
+          AND CASE
+            WHEN "actions"."command"."progress_hold_reason" IS NOT DISTINCT FROM 'retry_exhausted' THEN "actions"."command"."progress_exhaustion_reason" IS NOT NULL
+            WHEN "actions"."command"."progress_hold_reason" IN ('awaiting_release','awaiting_publication') AND "actions"."command"."progress_resolution_owner" = 'client' THEN
+              "actions"."command"."progress_next_run_at" IS NULL AND "actions"."command"."progress_exhaustion_reason" IS NOT DISTINCT FROM CASE WHEN "actions"."command"."progress_hold_reason" = 'awaiting_release' THEN 'binding_observation_budget'::actions.execution_exhaustion_reason ELSE 'readback_observation_budget'::actions.execution_exhaustion_reason END
+            ELSE "actions"."command"."progress_exhaustion_reason" IS NULL END
+          AND CASE
+            WHEN "actions"."command"."progress_exhaustion_reason" IS NULL THEN num_nonnulls("actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 0
+            WHEN "actions"."command"."progress_exhaustion_reason" IN ('binding_observation_budget','prewrite_observation_budget') THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
+            WHEN "actions"."command"."progress_exhaustion_reason" = 'readback_observation_budget' THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
+            ELSE "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL END
+        ELSE num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at", "actions"."command"."progress_cycle_command_id") = 0
+        END) IS TRUE
 command_cycle_planned_step_distinct: "actions"."command"."cycle_planned_step_id" IS NULL OR "actions"."command"."cycle_planned_step_id" IS DISTINCT FROM "actions"."command"."progress_step_id"
 command_cycle_not_own_predecessor: "actions"."command"."id" IS DISTINCT FROM "actions"."command"."cycle_predecessor_command_id"
 command_digest_shape: "actions"."command"."request_digest" ~ '^[0-9a-f]{64}$' AND "actions"."command"."digest_version" = 1
@@ -359,12 +395,12 @@ dependency_not_self: "actions"."dependency"."dependent_action_id" <> "actions"."
 
 ## `actions.execution`
 
-One durable obligation for an exact approval. SQL owns its due time and current responsibility.
+One durable obligation for an exact approval. SQL owns its due time and current responsibility; an exact pointer links the current explanation to immutable command history.
 
 | Field | SQL type / enum | Nullable | Key / default |
 | --- | --- | --- | --- |
-| `id` | text | No | PK; FK → actions.execution_step.execution_id |
-| `organization_id` | text | No | FK → public.organization.id; FK → actions.approval.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id |
+| `id` | text | No | PK; FK → actions.execution_step.execution_id; FK → actions.command.progress_execution_id |
+| `organization_id` | text | No | FK → public.organization.id; FK → actions.approval.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id; FK → actions.command.organization_id |
 | `approval_id` | text | No | FK → actions.approval.id |
 | `phase` | execution_phase: ready, claimed, verification_due, uncertain, blocked, settled, cancelled | No | — |
 | `next_run_at` | timestamp with time zone | Yes | — |
@@ -382,6 +418,7 @@ One durable obligation for an exact approval. SQL owns its due time and current 
 | `plan_version` | integer | No | — |
 | `writes_closed_at` | timestamp with time zone | Yes | — |
 | `cancelled_command_id` | text | Yes | FK → actions.command.id |
+| `current_progress_command_id` | text | Yes | FK → actions.command.id |
 | `plan_complete` | boolean | No | Default: False |
 
 ```sql
@@ -394,6 +431,7 @@ execution_organization_id_organization_id_fk: (organization_id) → public.organ
 execution_approval_scope: (organization_id, approval_id) → actions.approval (organization_id, id)
 execution_next_step_scope: (organization_id, id, next_step_id) → actions.execution_step (organization_id, execution_id, id)
 execution_cancel_command_scope: (organization_id, cancelled_command_id) → actions.command (organization_id, id)
+execution_current_progress_scope: (organization_id, id, current_progress_command_id) → actions.command (organization_id, progress_execution_id, id)
 execution_resource_guard_identity: (resource_guard_id) → actions.resource_guard (id)
 execution_identity_nonempty: length("actions"."execution"."id") > 0 AND length("actions"."execution"."approval_id") > 0
 execution_generations: "actions"."execution"."delivery_generation" > 0 AND "actions"."execution"."claim_generation" >= 0 AND "actions"."execution"."plan_version" > 0

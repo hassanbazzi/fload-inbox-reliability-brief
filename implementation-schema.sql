@@ -2916,3 +2916,198 @@ BEGIN
   PERFORM set_config('lock_timeout',previous_lock_timeout,true);
 END;
 $review_browsing_indexes$;
+
+-- 0161_many_stranger.sql
+CREATE TYPE "actions"."execution_exhaustion_reason" AS ENUM('binding_observation_budget', 'prewrite_observation_budget', 'readback_observation_budget', 'effect_attempt_budget', 'effect_permanent_rejection', 'effect_retry_not_authorized');--> statement-breakpoint
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_instant_bounds";--> statement-breakpoint
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_cycle_shape";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_phase" "actions"."execution_phase";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_result" "actions"."execution_result";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_hold_reason" "actions"."execution_hold_reason";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_resolution_owner" "actions"."execution_resolution_owner";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_exhaustion_reason" "actions"."execution_exhaustion_reason";--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_next_run_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD COLUMN "progress_cycle_command_id" text;--> statement-breakpoint
+ALTER TABLE "actions"."execution" ADD COLUMN "current_progress_command_id" text;--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_execution_identity" UNIQUE("organization_id","progress_execution_id","id");--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_progress_cycle_scope" FOREIGN KEY ("organization_id","progress_execution_id","progress_cycle_command_id") REFERENCES "actions"."command"("organization_id","progress_execution_id","id") ON DELETE no action ON UPDATE no action DEFERRABLE INITIALLY DEFERRED;--> statement-breakpoint
+ALTER TABLE "actions"."execution" ADD CONSTRAINT "execution_current_progress_scope" FOREIGN KEY ("organization_id","id","current_progress_command_id") REFERENCES "actions"."command"("organization_id","progress_execution_id","id") ON DELETE no action ON UPDATE no action DEFERRABLE INITIALLY DEFERRED;--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_progress_snapshot_shape" CHECK ((CASE
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND "actions"."command"."progress_phase" IS NOT NULL AND "actions"."command"."progress_phase" IN ('verification_due','uncertain','blocked','settled')
+          AND ("actions"."command"."progress_phase" = 'settled') = ("actions"."command"."progress_result" IS NOT NULL)
+          AND "actions"."command"."progress_result" IS DISTINCT FROM 'cancelled'
+          AND ("actions"."command"."progress_phase" IN ('blocked','uncertain')) = ("actions"."command"."progress_hold_reason" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" <> 'uncertain' OR "actions"."command"."progress_hold_reason" IS NOT DISTINCT FROM 'uncertain_write')
+          AND ("actions"."command"."progress_phase" IN ('blocked','uncertain') OR ("actions"."command"."progress_phase" = 'settled' AND "actions"."command"."progress_result" IS NOT DISTINCT FROM 'failed')) = ("actions"."command"."progress_resolution_owner" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" NOT IN ('verification_due','uncertain') OR "actions"."command"."progress_next_run_at" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" <> 'settled' OR "actions"."command"."progress_next_run_at" IS NULL)
+          AND ("actions"."command"."progress_phase" <> 'blocked' OR "actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_hold_reason" IN ('awaiting_release','awaiting_publication','resource_busy','evidence_conflict'))
+          AND CASE
+            WHEN "actions"."command"."progress_hold_reason" IS NOT DISTINCT FROM 'retry_exhausted' THEN "actions"."command"."progress_exhaustion_reason" IS NOT NULL
+            WHEN "actions"."command"."progress_hold_reason" IN ('awaiting_release','awaiting_publication') AND "actions"."command"."progress_resolution_owner" = 'client' THEN
+              "actions"."command"."progress_next_run_at" IS NULL AND "actions"."command"."progress_exhaustion_reason" IS NOT DISTINCT FROM CASE WHEN "actions"."command"."progress_hold_reason" = 'awaiting_release' THEN 'binding_observation_budget'::actions.execution_exhaustion_reason ELSE 'readback_observation_budget'::actions.execution_exhaustion_reason END
+            ELSE "actions"."command"."progress_exhaustion_reason" IS NULL END
+          AND CASE
+            WHEN "actions"."command"."progress_exhaustion_reason" IS NULL THEN num_nonnulls("actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 0
+            WHEN "actions"."command"."progress_exhaustion_reason" IN ('binding_observation_budget','prewrite_observation_budget') THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
+            WHEN "actions"."command"."progress_exhaustion_reason" = 'readback_observation_budget' THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
+            ELSE "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL END
+        ELSE num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at", "actions"."command"."progress_cycle_command_id") = 0
+        END) IS TRUE);--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_instant_bounds" CHECK (("actions"."command"."accepted_at" IS NULL OR "actions"."command"."accepted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_anchor_at" IS NULL OR "actions"."command"."cycle_anchor_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_decisive_after_at" IS NULL OR "actions"."command"."cycle_decisive_after_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_next_run_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz));--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_cycle_shape" CHECK (CASE
+        WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
+          AND CASE "actions"."command"."kind"
+            WHEN 'open_recovery' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NULL
+            WHEN 'reconcile' THEN "actions"."command"."principal_kind" IN ('user','api_key') AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            WHEN 'resume_hold' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            ELSE false END
+          AND CASE "actions"."command"."cycle_purpose"
+            WHEN 'binding' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'prewrite' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NOT NULL
+            WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            ELSE false END
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_execution_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        END);--> statement-breakpoint
+
+-- The common owner validates neutral structural provenance only. Provider-owned
+-- proof and Core finality policy run once in the canonical normalization writer.
+CREATE FUNCTION actions.check_progress_command() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; ap actions.approval; t actions.command_target; cycle actions.command;
+BEGIN
+  IF NEW.kind<>'record_progress' OR NEW.outcome<>'accepted' THEN RETURN NULL; END IF;
+  SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.progress_execution_id;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=e.organization_id AND id=e.approval_id;
+  SELECT * INTO t FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=NEW.id AND action_id=ap.action_id;
+  IF t.command_id IS NULL OR EXISTS(SELECT 1 FROM actions.command_target x WHERE x.organization_id=NEW.organization_id AND x.command_id=NEW.id AND x.action_id<>ap.action_id)
+    OR ROW(t.previous_approval_id,t.result_approval_id,t.previous_revision_id,t.result_revision_id,t.previous_decision,t.result_decision)
+      IS DISTINCT FROM ROW(ap.id,ap.id,ap.revision_id,ap.revision_id,'approved'::actions.decision,'approved'::actions.decision) THEN
+    RAISE EXCEPTION 'Progress requires its exact approved ticket history target' USING ERRCODE='23514';
+  END IF;
+  IF NEW.progress_cycle_command_id IS NOT NULL THEN
+    SELECT * INTO cycle FROM actions.command WHERE organization_id=NEW.organization_id AND progress_execution_id=e.id AND id=NEW.progress_cycle_command_id;
+    IF NOT FOUND OR cycle.outcome<>'accepted' OR cycle.kind NOT IN ('open_recovery','reconcile','resume_hold') OR cycle.cycle_purpose IS NULL THEN
+      RAISE EXCEPTION 'Progress cycle must retain its exact accepted obligation' USING ERRCODE='23514';
+    END IF;
+    IF NEW.progress_exhaustion_reason='binding_observation_budget' AND
+        (cycle.cycle_purpose<>'binding' OR NEW.progress_step_id IS DISTINCT FROM cycle.progress_step_id)
+      OR NEW.progress_exhaustion_reason='prewrite_observation_budget' AND
+        (cycle.cycle_purpose<>'prewrite' OR NEW.progress_step_id IS DISTINCT FROM cycle.cycle_planned_step_id)
+      OR NEW.progress_exhaustion_reason='readback_observation_budget' AND
+        (cycle.cycle_purpose<>'readback' OR ROW(NEW.progress_step_id,NEW.progress_subject_attempt_id) IS DISTINCT FROM ROW(cycle.progress_step_id,cycle.progress_subject_attempt_id))
+      OR NEW.progress_exhaustion_reason IN ('effect_attempt_budget','effect_permanent_rejection','effect_retry_not_authorized') AND
+        ROW(NEW.progress_step_id,NEW.progress_subject_attempt_id) IS DISTINCT FROM ROW(cycle.progress_step_id,cycle.progress_subject_attempt_id) THEN
+      RAISE EXCEPTION 'Progress exhaustion must retain its exact cycle scope' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER progress_command_structure AFTER INSERT ON actions.command DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_progress_command();
+--> statement-breakpoint
+CREATE FUNCTION actions.guard_current_progress() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE c actions.command; ap actions.approval; t actions.command_target; a actions.action; previous_version bigint;
+BEGIN
+  IF TG_OP='INSERT' THEN
+    IF NEW.current_progress_command_id IS NOT NULL THEN
+      RAISE EXCEPTION 'A new execution has no normalized progress history' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.current_progress_command_id IS NULL THEN RETURN NEW; END IF;
+  -- Snapshot due is historical. A due-only update changes the sole current
+  -- next_run_at authority without manufacturing visible history or attention.
+  IF NEW.current_progress_command_id IS NOT DISTINCT FROM OLD.current_progress_command_id THEN
+    IF ROW(NEW.phase,NEW.result,NEW.hold_reason,NEW.resolution_owner,NEW.claim_generation,NEW.claim_token,NEW.plan_complete,NEW.writes_closed_at,NEW.next_step_id,NEW.settled_at)
+      IS DISTINCT FROM ROW(OLD.phase,OLD.result,OLD.hold_reason,OLD.resolution_owner,OLD.claim_generation,OLD.claim_token,OLD.plan_complete,OLD.writes_closed_at,OLD.next_step_id,OLD.settled_at) THEN
+      RAISE EXCEPTION 'Changed execution facts must invalidate normalized progress' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+  END IF;
+  SELECT * INTO c FROM actions.command WHERE organization_id=NEW.organization_id AND progress_execution_id=NEW.id AND id=NEW.current_progress_command_id;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=NEW.organization_id AND id=NEW.approval_id;
+  SELECT * INTO t FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=c.id AND action_id=ap.action_id;
+  SELECT * INTO a FROM actions.action WHERE organization_id=NEW.organization_id AND id=ap.action_id;
+  IF c.id IS NULL OR c.kind<>'record_progress' OR c.outcome<>'accepted' OR t.command_id IS NULL
+    OR t.result_version IS DISTINCT FROM a.version
+    OR ROW(t.result_approval_id,t.result_revision_id) IS DISTINCT FROM ROW(ap.id,ap.revision_id)
+    OR ROW(NEW.phase,NEW.result,NEW.hold_reason,NEW.resolution_owner,NEW.next_run_at)
+      IS DISTINCT FROM ROW(c.progress_phase,c.progress_result,c.progress_hold_reason,c.progress_resolution_owner,c.progress_next_run_at) THEN
+    RAISE EXCEPTION 'Current progress requires the exact current accepted snapshot and ticket version' USING ERRCODE='23514';
+  END IF;
+  IF OLD.current_progress_command_id IS NOT NULL THEN
+    SELECT result_version INTO previous_version FROM actions.command_target WHERE organization_id=OLD.organization_id AND command_id=OLD.current_progress_command_id AND action_id=ap.action_id;
+    IF t.result_version<=previous_version THEN
+      RAISE EXCEPTION 'Current progress cannot regress to an older history version' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER execution_current_progress_structure BEFORE INSERT OR UPDATE ON actions.execution FOR EACH ROW EXECUTE FUNCTION actions.guard_current_progress();
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.guard_resource_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Global resource identity cannot be deleted by runtime' USING ERRCODE='23514'; END IF;
+  IF TG_OP='INSERT' THEN
+    IF NEW.holder_execution_id IS NOT NULL OR NEW.acquisition_generation<>0 THEN
+      RAISE EXCEPTION 'A resource identity starts unheld at generation zero' USING ERRCODE='23514';
+    END IF;
+  ELSE
+    IF ROW(NEW.id,NEW.provider,NEW.resource_key,NEW.key_version) IS DISTINCT FROM ROW(OLD.id,OLD.provider,OLD.resource_key,OLD.key_version) THEN
+      RAISE EXCEPTION 'Global resource identity is immutable' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt c WHERE c.organization_id=OLD.holder_organization_id
+        AND c.execution_id=OLD.holder_execution_id AND c.kind='conflicting_completion'
+    ) THEN RAISE EXCEPTION 'Unresolved capture conflict forbids resource release' USING ERRCODE='23514'; END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt a
+      WHERE a.organization_id=OLD.holder_organization_id AND a.execution_id=OLD.holder_execution_id
+        AND a.kind IN ('write','readback','inspection','generation','manual_observation')
+        AND a.finished_at IS NULL
+    ) THEN RAISE EXCEPTION 'Unfinished originals forbid resource release' USING ERRCODE='23514'; END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt a
+      WHERE a.organization_id=OLD.holder_organization_id AND a.execution_id=OLD.holder_execution_id
+        AND a.kind='write' AND NOT (
+          a.result IS NOT DISTINCT FROM 'known_not_applied'
+          AND a.non_application_basis IS NOT DISTINCT FROM 'pre_dispatch_failure')
+    ) AND NOT EXISTS (
+      SELECT 1 FROM actions.execution e JOIN actions.command c
+        ON c.organization_id=e.organization_id AND c.progress_execution_id=e.id AND c.id=e.current_progress_command_id
+      JOIN actions.approval ap ON ap.organization_id=e.organization_id AND ap.id=e.approval_id
+      JOIN actions.command_target t ON t.organization_id=c.organization_id AND t.command_id=c.id AND t.action_id=ap.action_id
+      JOIN actions.action ticket ON ticket.organization_id=ap.organization_id AND ticket.id=ap.action_id
+      WHERE e.organization_id=OLD.holder_organization_id AND e.id=OLD.holder_execution_id AND e.resource_guard_id=OLD.id
+        AND e.phase='settled' AND e.result IN ('verified_live','verified_editable')
+        AND c.kind='record_progress' AND c.outcome='accepted' AND c.progress_phase=e.phase AND c.progress_result=e.result
+        AND t.result_version=ticket.version AND t.result_approval_id=ap.id AND t.result_revision_id=ap.revision_id
+    ) THEN
+      -- Only the canonical provider owner may establish neutral verified settlement.
+      -- Common SQL validates exact immutable provenance, never native semantics.
+      RAISE EXCEPTION 'Resource release requires proved finality for every original interaction' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NULL AND NEW.holder_execution_id IS NOT NULL THEN
+      IF NEW.acquisition_generation<>OLD.acquisition_generation+1 THEN RAISE EXCEPTION 'Resource acquisition requires next generation' USING ERRCODE='23514'; END IF;
+    ELSIF NEW.acquisition_generation<>OLD.acquisition_generation THEN
+      RAISE EXCEPTION 'Resource generation changes only on acquisition' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NOT NULL
+      AND ROW(NEW.holder_organization_id,NEW.holder_execution_id,NEW.acquired_at) IS DISTINCT FROM ROW(OLD.holder_organization_id,OLD.holder_execution_id,OLD.acquired_at) THEN
+      RAISE EXCEPTION 'A held resource cannot change holder or acquisition time' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
