@@ -3485,3 +3485,59 @@ BEGIN
 END $$;
 --> statement-breakpoint
 CREATE TRIGGER review_write_admission BEFORE INSERT ON actions.execution_attempt FOR EACH ROW EXECUTE FUNCTION app_store_connect.guard_review_write_admission();
+
+-- 0163_early_ironclad.sql
+ALTER TABLE "actions"."execution" DROP CONSTRAINT "execution_hold_shape";--> statement-breakpoint
+ALTER TABLE "actions"."execution" ADD CONSTRAINT "execution_hold_shape" CHECK (("actions"."execution"."phase" IN ('blocked','uncertain')) = ("actions"."execution"."hold_reason" IS NOT NULL) AND ("actions"."execution"."phase" <> 'uncertain' OR "actions"."execution"."hold_reason" IS NOT DISTINCT FROM 'uncertain_write') AND ("actions"."execution"."phase" <> 'blocked' OR "actions"."execution"."next_run_at" IS NULL OR "actions"."execution"."hold_reason" IN ('awaiting_release','awaiting_publication','resource_busy','evidence_conflict') OR ("actions"."execution"."current_progress_command_id" IS NOT NULL AND "actions"."execution"."hold_reason" IN ('uncertain_write','retry_exhausted','target_changed','unsupported_readback'))));--> statement-breakpoint
+
+-- A stopped readback has no ordinary future date. A due marker on that closed
+-- scope is state-only normalization debt, never another observation allowance.
+-- Native result classification remains in the canonical provider owner.
+CREATE FUNCTION actions.guard_readback_normalization_debt() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE p actions.command; c actions.command; ap actions.approval; pt actions.command_target;
+  ticket actions.action;
+BEGIN
+  IF NEW.phase<>'blocked' OR NEW.next_run_at IS NULL THEN RETURN NULL; END IF;
+  IF NEW.hold_reason NOT IN ('uncertain_write','retry_exhausted','target_changed','unsupported_readback','awaiting_publication') THEN RETURN NULL; END IF;
+  SELECT * INTO p FROM actions.command WHERE organization_id=NEW.organization_id AND id=NEW.current_progress_command_id;
+  -- Existing passive publication scheduling remains ordinary recovery.
+  IF NEW.hold_reason='awaiting_publication' AND (p.id IS NULL OR p.progress_exhaustion_reason IS DISTINCT FROM 'readback_observation_budget') THEN RETURN NULL; END IF;
+  SELECT * INTO c FROM actions.command WHERE organization_id=NEW.organization_id AND id=p.progress_cycle_command_id;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=NEW.organization_id AND id=NEW.approval_id;
+  SELECT * INTO pt FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=p.id AND action_id=ap.action_id;
+  SELECT * INTO ticket FROM actions.action WHERE organization_id=NEW.organization_id AND id=ap.action_id;
+  IF p.id IS NULL OR c.id IS NULL OR ap.id IS NULL OR pt.command_id IS NULL OR ticket.id IS NULL
+    OR p.kind<>'record_progress' OR p.outcome<>'accepted' OR p.progress_execution_id<>NEW.id
+    OR ROW(p.progress_phase,p.progress_result,p.progress_hold_reason,p.progress_resolution_owner)
+       IS DISTINCT FROM ROW(NEW.phase,NEW.result,NEW.hold_reason,NEW.resolution_owner)
+    OR c.progress_execution_id<>NEW.id OR c.kind NOT IN ('open_recovery','reconcile','resume_hold') OR c.outcome<>'accepted'
+    OR c.cycle_purpose IS DISTINCT FROM 'readback' OR c.progress_step_id IS DISTINCT FROM NEW.next_step_id OR c.progress_subject_attempt_id IS NULL
+    OR ROW(pt.result_approval_id,pt.result_revision_id) IS DISTINCT FROM ROW(ap.id,ap.revision_id)
+    OR pt.result_version>ticket.version OR ticket.decision<>'approved'
+    OR ROW(ticket.current_approval_id,ticket.current_revision_id) IS DISTINCT FROM ROW(ap.id,ap.revision_id)
+    OR NEW.claim_token IS NOT NULL OR NEW.claim_expires_at IS NOT NULL
+    OR (CASE WHEN NEW.hold_reason IN ('retry_exhausted','awaiting_publication')
+         THEN p.progress_exhaustion_reason IS DISTINCT FROM 'readback_observation_budget'
+         ELSE p.progress_exhaustion_reason IS NOT NULL END)
+    OR EXISTS (SELECT 1 FROM actions.command n WHERE n.organization_id=c.organization_id AND n.cycle_predecessor_command_id=c.id AND n.kind IN ('reconcile','resume_hold') AND n.outcome='accepted')
+    OR EXISTS (SELECT 1 FROM actions.execution_attempt a WHERE a.organization_id=NEW.organization_id AND a.execution_id=NEW.id AND a.kind IN ('write','readback','inspection','generation','manual_observation') AND a.finished_at IS NULL)
+  THEN RAISE EXCEPTION 'Normalization debt requires exact stopped readback provenance' USING ERRCODE='23514'; END IF;
+  IF TG_OP='INSERT' OR OLD.next_run_at IS NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM actions.command k
+      JOIN actions.command_target kt ON kt.organization_id=k.organization_id AND kt.command_id=k.id AND kt.action_id=ap.action_id
+      JOIN actions.execution_attempt capture ON capture.organization_id=k.organization_id AND capture.id=k.progress_subject_attempt_id AND capture.evidence_command_id=k.id
+      JOIN actions.execution_attempt original ON original.organization_id=capture.organization_id AND original.id=capture.subject_attempt_id
+      WHERE k.organization_id=NEW.organization_id AND k.progress_execution_id=NEW.id AND k.kind='record_attempt' AND k.outcome='accepted'
+        AND k.accepted_at=NEW.next_run_at AND kt.result_version=ticket.version AND kt.result_version>pt.result_version
+        AND ROW(kt.result_approval_id,kt.result_revision_id) IS NOT DISTINCT FROM ROW(ap.id,ap.revision_id)
+        AND capture.kind='late_evidence' AND capture.execution_id=NEW.id AND capture.step_id=c.progress_step_id
+        AND original.execution_id=NEW.id AND original.step_id=c.progress_step_id AND original.finished_at IS NOT NULL
+        AND ((original.kind='write' AND original.id=c.progress_subject_attempt_id)
+          OR (original.kind='readback' AND original.subject_attempt_id=c.progress_subject_attempt_id AND original.cycle_command_id=c.id))
+    ) THEN RAISE EXCEPTION 'New normalization debt requires its exact accepted late capture' USING ERRCODE='23514'; END IF;
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER execution_readback_normalization_debt AFTER INSERT OR UPDATE ON actions.execution DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.guard_readback_normalization_debt();
