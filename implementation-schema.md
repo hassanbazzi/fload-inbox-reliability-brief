@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0157: 21 relations, 341 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0158: 21 relations, 345 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -463,7 +463,7 @@ One admitted interaction, its fence, and its retained outcome. It is not a queue
 | `non_application_basis` | non_application_basis: provider_rejection, pre_dispatch_failure, provider_proved_non_application | Yes | — |
 | `retry_disposition` | retry_disposition: retryable, permanent | Yes | — |
 | `uncertainty_reason` | uncertainty_reason: transport_lost, claim_expired, invalid_response, accepted_pending | Yes | — |
-| `unreadable_reason` | unreadable_reason: unavailable, partial, unsupported, cancelled, no_editable_release | Yes | — |
+| `unreadable_reason` | unreadable_reason: claim_expired, unavailable, partial, unsupported, cancelled, no_editable_release | Yes | — |
 | `terminal_outcome` | boolean | Yes | — |
 | `semantic_fingerprint` | text | Yes | — |
 | `fingerprint_version` | integer | Yes | — |
@@ -907,6 +907,8 @@ Exact native review/response identities, selected source link and connector, and
 | `response_id` | text | Yes | — |
 | `native_state_source` | review_native_state_source: api_publication, browser_pending | Yes | — |
 | `native_state` | review_native_state: PUBLISHED, PENDING_PUBLISH, NONE, PENDING_CREATE, PENDING_UPDATE, PENDING_DELETE | Yes | — |
+| `review_created_date` | text | Yes | — |
+| `response_last_modified_date` | text | Yes | — |
 
 ```sql
 review_target_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
@@ -917,6 +919,9 @@ asc_review_target_identity: length("app_store_connect"."review_target"."source_a
 asc_review_target_credential_shape: ("app_store_connect"."review_target"."credential_kind" = 'individual' AND "app_store_connect"."review_target"."credential_team_issuer_id" IS NULL)
           OR ("app_store_connect"."review_target"."credential_kind" = 'team' AND "app_store_connect"."review_target"."credential_team_issuer_id" IS NOT NULL AND length("app_store_connect"."review_target"."credential_team_issuer_id") > 0)
 asc_review_target_proposal_state: "app_store_connect"."review_target"."purpose" <> 'proposal' OR ("app_store_connect"."review_target"."native_state" IS NULL AND "app_store_connect"."review_target"."native_state_source" IS NULL)
+asc_review_raw_dates_scope: "app_store_connect"."review_target"."purpose" = 'observation' OR num_nonnulls("app_store_connect"."review_target"."review_created_date","app_store_connect"."review_target"."response_last_modified_date")=0
+asc_review_raw_dates_shape: ("app_store_connect"."review_target"."review_created_date" IS NULL OR length("app_store_connect"."review_target"."review_created_date") BETWEEN 17 AND 128)
+          AND ("app_store_connect"."review_target"."response_last_modified_date" IS NULL OR (length("app_store_connect"."review_target"."response_last_modified_date") BETWEEN 17 AND 128 AND "app_store_connect"."review_target"."response_id" IS NOT NULL))
 asc_review_target_state_source: 
         ("app_store_connect"."review_target"."native_state" IS NULL OR "app_store_connect"."review_target"."native_state_source" IS NOT NULL)
         AND ("app_store_connect"."review_target"."native_state_source" IS DISTINCT FROM 'api_publication' OR "app_store_connect"."review_target"."native_state" IS NULL OR "app_store_connect"."review_target"."native_state" IN ('PUBLISHED', 'PENDING_PUBLISH'))
@@ -950,24 +955,32 @@ The immutable native HTTP response attached to one admitted attempt.
 | `organization_id` | text | No | PK; FK → actions.execution_attempt.organization_id |
 | `attempt_id` | text | No | PK; FK → actions.execution_attempt.id |
 | `transport` | review_receipt_transport: asc_api | No | — |
-| `response_kind` | review_receipt_kind: accepted, deleted, http_error, invalid_response | No | — |
-| `response_status` | integer | No | — |
+| `response_kind` | review_receipt_kind: accepted, deleted, http_error, invalid_response, read_review, read_unavailable, read_not_sent, read_transport_lost | No | — |
+| `response_status` | integer | Yes | — |
 | `provider_resource_id` | text | Yes | — |
 | `response_body` | text | Yes | — |
 | `native_state` | review_native_state: PUBLISHED, PENDING_PUBLISH, NONE, PENDING_CREATE, PENDING_UPDATE, PENDING_DELETE | Yes | — |
 | `error_code` | text | Yes | — |
+| `read_not_sent_reason` | review_read_not_sent_reason: invalid_input, credentials_unavailable, rate_limited, aborted | Yes | — |
+| `read_invalid_reason` | review_read_invalid_reason: malformed_body, unexpected_status, redirect, identity_mismatch, missing_response_linkage, missing_included_response, duplicate_resource, unrelated_included_response, invalid_continuation | Yes | — |
 
 ```sql
 attempt_receipt_organization_id_attempt_id_pk: PRIMARY KEY (organization_id, attempt_id)
 asc_receipt_attempt_scope: (organization_id, attempt_id) → actions.execution_attempt (organization_id, id)
-asc_receipt_status: "app_store_connect"."attempt_receipt"."response_status" BETWEEN 100 AND 599
+asc_receipt_status: ("app_store_connect"."attempt_receipt"."response_status" IS NULL) = ("app_store_connect"."attempt_receipt"."response_kind"::text IN ('read_not_sent','read_transport_lost')) AND ("app_store_connect"."attempt_receipt"."response_status" IS NULL OR "app_store_connect"."attempt_receipt"."response_status" BETWEEN 100 AND 599)
 asc_receipt_identity: ("app_store_connect"."attempt_receipt"."provider_resource_id" IS NULL OR length("app_store_connect"."attempt_receipt"."provider_resource_id") > 0) AND ("app_store_connect"."attempt_receipt"."error_code" IS NULL OR length("app_store_connect"."attempt_receipt"."error_code") > 0)
-asc_receipt_native_shape: CASE "app_store_connect"."attempt_receipt"."response_kind"
+asc_receipt_native_shape: CASE "app_store_connect"."attempt_receipt"."response_kind"::text
     WHEN 'accepted' THEN "app_store_connect"."attempt_receipt"."response_status"=201 AND "app_store_connect"."attempt_receipt"."provider_resource_id" IS NOT NULL AND "app_store_connect"."attempt_receipt"."error_code" IS NULL AND ("app_store_connect"."attempt_receipt"."native_state" IS NULL OR "app_store_connect"."attempt_receipt"."native_state" IN ('PUBLISHED','PENDING_PUBLISH'))
     WHEN 'deleted' THEN "app_store_connect"."attempt_receipt"."response_status"=204 AND num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state","app_store_connect"."attempt_receipt"."error_code")=0
     WHEN 'http_error' THEN "app_store_connect"."attempt_receipt"."response_status">=400 AND num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state")=0
     WHEN 'invalid_response' THEN num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state","app_store_connect"."attempt_receipt"."error_code")=0
+    WHEN 'read_review' THEN "app_store_connect"."attempt_receipt"."response_status"=200 AND num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state","app_store_connect"."attempt_receipt"."error_code")=0
+    WHEN 'read_unavailable' THEN "app_store_connect"."attempt_receipt"."response_status"=404 AND num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state","app_store_connect"."attempt_receipt"."error_code")=0
+    WHEN 'read_not_sent' THEN "app_store_connect"."attempt_receipt"."response_status" IS NULL AND num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state","app_store_connect"."attempt_receipt"."error_code")=0
+    WHEN 'read_transport_lost' THEN "app_store_connect"."attempt_receipt"."response_status" IS NULL AND num_nonnulls("app_store_connect"."attempt_receipt"."provider_resource_id","app_store_connect"."attempt_receipt"."response_body","app_store_connect"."attempt_receipt"."native_state","app_store_connect"."attempt_receipt"."error_code")=0
     ELSE false END
+asc_receipt_read_reasons: ("app_store_connect"."attempt_receipt"."response_kind"::text = 'read_not_sent') = ("app_store_connect"."attempt_receipt"."read_not_sent_reason" IS NOT NULL)
+        AND ("app_store_connect"."attempt_receipt"."read_invalid_reason" IS NULL OR "app_store_connect"."attempt_receipt"."response_kind"::text = 'invalid_response')
 ```
 
 ## `composition.operation_contract`
