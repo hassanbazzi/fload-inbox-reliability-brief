@@ -4240,3 +4240,142 @@ BEGIN
 END $$;
 --> statement-breakpoint
 CREATE CONSTRAINT TRIGGER command_unissued_resume_commit AFTER INSERT ON actions.command DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_unissued_resume_commit();
+
+-- 0168_asc_proved_nonapplication_release.sql
+-- Proved effect-history enumeration must not scan retained reads.
+-- Prepared concurrently on populated execution history; untouched heaps may build transactionally.
+-- Run scripts/prepare-retained-evidence-indexes.ts with an explicitly selected database first.
+DO $effect_history_index$
+DECLARE
+  item record;
+  index_id oid;
+  previous_lock_timeout text := current_setting('lock_timeout');
+BEGIN
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('fload:retained-evidence-indexes',0)) THEN
+    RAISE EXCEPTION 'Retained evidence index preparation or migration is already running';
+  END IF;
+  PERFORM set_config('lock_timeout','5s',true);
+  -- Fixed order and bounded waits; prepared validation allows normal DML.
+  LOCK TABLE actions.execution_attempt IN SHARE UPDATE EXCLUSIVE MODE;
+  FOR item IN SELECT * FROM (VALUES
+    ('attempt_effect_history','execution_attempt',5,
+     'CREATE INDEX attempt_effect_history ON actions.execution_attempt USING btree (organization_id, execution_id, kind, step_id COLLATE "C", number) WHERE (kind = ANY (ARRAY[''write''::actions.attempt_kind, ''generation''::actions.attempt_kind, ''conflicting_completion''::actions.attempt_kind]))')
+  ) AS required(name,table_name,key_count,definition)
+  LOOP
+    index_id := to_regclass('actions.' || item.name);
+    IF index_id IS NULL THEN
+      EXECUTE format('LOCK TABLE actions.%I IN SHARE MODE',item.table_name);
+      -- Do not scan rows or trust estimates; only untouched empty heaps build
+      -- while holding this transactional write-excluding lock.
+      IF pg_relation_size(to_regclass('actions.' || item.table_name)) <> 0 THEN
+        RAISE EXCEPTION 'Prepare actions.% before migration: run packages/database/scripts/prepare-retained-evidence-indexes.ts --database-name NAME --execute with the explicitly selected DATABASE_URL',item.name;
+      END IF;
+      EXECUTE item.definition;
+      index_id := to_regclass('actions.' || item.name);
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+      WHERE i.indexrelid=index_id AND i.indrelid=to_regclass('actions.' || item.table_name) AND c.relkind='i'
+        AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate
+        AND NOT i.indisprimary AND NOT i.indisexclusion AND NOT i.indnullsnotdistinct
+        AND i.indnkeyatts=item.key_count AND i.indnatts=item.key_count
+        AND i.indexprs IS NULL
+        AND pg_get_indexdef(i.indexrelid,0,false)=item.definition
+        AND NOT EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conindid=i.indexrelid)
+    ) THEN
+      RAISE EXCEPTION 'actions.% has a mismatched definition, constraint owner, or invalid build state; operator inspection is required',item.name;
+    END IF;
+  END LOOP;
+  PERFORM set_config('lock_timeout',previous_lock_timeout,true);
+END;
+$effect_history_index$;
+
+--> statement-breakpoint
+-- Neutral structural proof only. The canonical installed provider owner decodes
+-- every original/effective capture before release. A definitive rejection can
+-- release exclusion without closing future effects or granting Retry authority.
+-- Native HTTP status interpretation remains outside the Actions schema.
+CREATE OR REPLACE FUNCTION actions.guard_resource_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Global resource identity cannot be deleted by runtime' USING ERRCODE='23514'; END IF;
+  IF TG_OP='INSERT' THEN
+    IF NEW.holder_execution_id IS NOT NULL OR NEW.acquisition_generation<>0 THEN
+      RAISE EXCEPTION 'A resource identity starts unheld at generation zero' USING ERRCODE='23514';
+    END IF;
+  ELSE
+    IF ROW(NEW.id,NEW.provider,NEW.resource_key,NEW.key_version) IS DISTINCT FROM ROW(OLD.id,OLD.provider,OLD.resource_key,OLD.key_version) THEN
+      RAISE EXCEPTION 'Global resource identity is immutable' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt c WHERE c.organization_id=OLD.holder_organization_id
+        AND c.execution_id=OLD.holder_execution_id AND c.kind='conflicting_completion'
+    ) THEN RAISE EXCEPTION 'Unresolved capture conflict forbids resource release' USING ERRCODE='23514'; END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt a
+      WHERE a.organization_id=OLD.holder_organization_id AND a.execution_id=OLD.holder_execution_id
+        AND a.kind IN ('write','readback','inspection','generation','manual_observation')
+        AND a.finished_at IS NULL
+    ) THEN RAISE EXCEPTION 'Unfinished originals forbid resource release' USING ERRCODE='23514'; END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt a
+      WHERE a.organization_id=OLD.holder_organization_id AND a.execution_id=OLD.holder_execution_id
+        AND a.kind='write' AND NOT (
+          (a.result IS NOT DISTINCT FROM 'known_not_applied'
+            AND a.non_application_basis IS NOT DISTINCT FROM 'pre_dispatch_failure')
+          OR EXISTS (
+            SELECT 1 FROM actions.execution_attempt effective
+            JOIN actions.command accepted
+              ON accepted.organization_id=effective.organization_id
+              AND accepted.progress_execution_id=effective.execution_id
+              AND accepted.progress_step_id=effective.step_id
+              AND accepted.progress_subject_attempt_id=effective.id
+              AND accepted.kind='record_attempt' AND accepted.outcome='accepted'
+            WHERE effective.organization_id=a.organization_id
+              AND effective.execution_id=a.execution_id AND effective.step_id=a.step_id
+              AND a.finished_at IS NOT NULL AND effective.finished_at IS NOT NULL
+              AND effective.result IS NOT DISTINCT FROM 'known_not_applied'
+              AND effective.non_application_basis IN ('pre_dispatch_failure','provider_rejection')
+              AND ((effective.id=a.id AND effective.kind='write' AND effective.subject_attempt_id IS NULL)
+                OR (a.result IS NOT DISTINCT FROM 'uncertain' AND a.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired'
+                  AND effective.kind='late_evidence' AND effective.subject_attempt_id=a.id
+                  AND effective.evidence_command_id=accepted.id))
+          ))
+    ) AND NOT EXISTS (
+      SELECT 1 FROM actions.execution e JOIN actions.command c
+        ON c.organization_id=e.organization_id AND c.progress_execution_id=e.id AND c.id=e.current_progress_command_id
+      JOIN actions.approval ap ON ap.organization_id=e.organization_id AND ap.id=e.approval_id
+      JOIN actions.command_target t ON t.organization_id=c.organization_id AND t.command_id=c.id AND t.action_id=ap.action_id
+      JOIN actions.action ticket ON ticket.organization_id=ap.organization_id AND ticket.id=ap.action_id
+      WHERE e.organization_id=OLD.holder_organization_id AND e.id=OLD.holder_execution_id AND e.resource_guard_id=OLD.id
+        AND e.plan_complete AND e.writes_closed_at IS NOT NULL
+        AND ((e.phase='settled' AND e.result IN ('verified_live','verified_editable')) OR
+          (e.phase='blocked' AND e.result IS NULL AND e.next_run_at IS NULL
+            AND e.resolution_owner='client'
+            AND (e.hold_reason='target_changed' OR
+              (e.hold_reason IN ('retry_exhausted','awaiting_publication') AND c.progress_exhaustion_reason='readback_observation_budget'))
+            AND EXISTS (SELECT 1 FROM actions.command cycle JOIN actions.execution_step step
+              ON step.organization_id=cycle.organization_id AND step.execution_id=cycle.progress_execution_id AND step.id=cycle.progress_step_id
+              WHERE cycle.organization_id=e.organization_id AND cycle.progress_execution_id=e.id AND cycle.id=c.progress_cycle_command_id
+                AND cycle.outcome='accepted' AND cycle.kind IN ('open_recovery','reconcile','resume_hold') AND cycle.cycle_purpose='readback'
+                AND step.verification_timing='after_effects' AND step.id=e.next_step_id)))
+        AND c.kind='record_progress' AND c.outcome='accepted' AND c.progress_phase=e.phase AND c.progress_result IS NOT DISTINCT FROM e.result
+        AND c.progress_hold_reason IS NOT DISTINCT FROM e.hold_reason AND c.progress_resolution_owner IS NOT DISTINCT FROM e.resolution_owner
+        AND t.result_version=ticket.version AND t.result_approval_id=ap.id AND t.result_revision_id=ap.revision_id
+    ) THEN
+      -- Only the canonical provider owner may close every planned effect.
+      -- Verification exhaustion is not success, but no longer excludes another writer.
+      -- Common SQL validates exact immutable provenance, never native semantics.
+      RAISE EXCEPTION 'Resource release requires proved finality for every original interaction' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NULL AND NEW.holder_execution_id IS NOT NULL THEN
+      IF NEW.acquisition_generation<>OLD.acquisition_generation+1 THEN RAISE EXCEPTION 'Resource acquisition requires next generation' USING ERRCODE='23514'; END IF;
+    ELSIF NEW.acquisition_generation<>OLD.acquisition_generation THEN
+      RAISE EXCEPTION 'Resource generation changes only on acquisition' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NOT NULL
+      AND ROW(NEW.holder_organization_id,NEW.holder_execution_id,NEW.acquired_at) IS DISTINCT FROM ROW(OLD.holder_organization_id,OLD.holder_execution_id,OLD.acquired_at) THEN
+      RAISE EXCEPTION 'A held resource cannot change holder or acquisition time' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
