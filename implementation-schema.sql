@@ -2283,3 +2283,41 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+-- 0157_pink_freak.sql
+CREATE INDEX "attempt_unresolved_effect" ON "actions"."execution_attempt" USING btree ("organization_id","execution_id") WHERE "actions"."execution_attempt"."kind" = 'conflicting_completion' OR ("actions"."execution_attempt"."kind" = 'write' AND NOT ("actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied' AND "actions"."execution_attempt"."non_application_basis" IS NOT DISTINCT FROM 'pre_dispatch_failure'));
+--> statement-breakpoint
+
+-- The two evidence-capture kinds are structurally required to be finished.
+-- Name every original kind explicitly so the existing partial authority index
+-- proves absence without reading completed attempt history.
+CREATE OR REPLACE FUNCTION actions.assert_execution_graph(scope_organization text, scope_execution text) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; ap actions.approval; a actions.action; unfinished actions.execution_attempt;
+BEGIN
+  SELECT * INTO e FROM actions.execution WHERE organization_id=scope_organization AND id=scope_execution;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=e.organization_id AND id=e.approval_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Execution requires its exact approval' USING ERRCODE='23514'; END IF;
+  SELECT * INTO a FROM actions.action WHERE organization_id=ap.organization_id AND id=ap.action_id;
+  IF NOT FOUND OR (e.phase NOT IN ('settled','cancelled') AND
+    (a.current_approval_id IS DISTINCT FROM ap.id OR a.current_revision_id IS DISTINCT FROM ap.revision_id OR a.decision <> 'approved')) THEN
+    RAISE EXCEPTION 'Active execution must retain the exact current approval and revision' USING ERRCODE='23514';
+  END IF;
+  IF NOT EXISTS(SELECT 1 FROM actions.execution_step s WHERE s.organization_id=e.organization_id AND s.execution_id=e.id) THEN
+    RAISE EXCEPTION 'Execution requires durable scoped plan steps' USING ERRCODE='23514';
+  END IF;
+  SELECT * INTO unfinished FROM actions.execution_attempt x WHERE x.organization_id=e.organization_id AND x.execution_id=e.id AND x.finished_at IS NULL AND x.kind IN ('write','readback','inspection','generation','manual_observation');
+  IF (e.phase='claimed') IS DISTINCT FROM (unfinished.id IS NOT NULL)
+    OR (unfinished.id IS NOT NULL AND (unfinished.claim_generation <> e.claim_generation OR unfinished.claim_token IS DISTINCT FROM e.claim_token)) THEN
+    RAISE EXCEPTION 'Committed claim and unfinished original attempt must agree' USING ERRCODE='23514';
+  END IF;
+  IF e.phase IN ('ready','verification_due','uncertain','claimed') AND e.next_step_id IS NULL THEN
+    RAISE EXCEPTION 'Active execution requires a concrete routing step' USING ERRCODE='23514';
+  END IF;
+  IF e.phase='cancelled' AND NOT EXISTS(SELECT 1 FROM actions.command c JOIN actions.command_target t ON t.organization_id=c.organization_id AND t.command_id=c.id
+      WHERE c.organization_id=e.organization_id AND c.id=e.cancelled_command_id AND c.outcome='accepted' AND c.kind IN ('undo','revise','reject') AND t.action_id=ap.action_id) THEN
+    RAISE EXCEPTION 'Execution cancellation requires its exact accepted ticket command' USING ERRCODE='23514';
+  END IF;
+  IF e.phase IN ('settled','cancelled') AND EXISTS(SELECT 1 FROM actions.resource_guard g WHERE g.holder_organization_id=e.organization_id AND g.holder_execution_id=e.id) THEN
+    RAISE EXCEPTION 'Terminal execution cannot retain a resource holder' USING ERRCODE='23514';
+  END IF;
+END $$;

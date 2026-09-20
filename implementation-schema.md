@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0156: 21 relations, 341 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0157: 21 relations, 341 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -493,6 +493,7 @@ attempt_one_late_completion: UNIQUE INDEX (organization_id ASC, subject_attempt_
 attempt_conflicting_capture_replay: UNIQUE INDEX (organization_id ASC, subject_attempt_id ASC, capture_digest_version ASC, capture_digest ASC) WHERE "actions"."execution_attempt"."kind" = 'conflicting_completion'
 attempt_prewrite_consumed_once: UNIQUE INDEX (organization_id ASC, prewrite_attempt_id ASC) WHERE "actions"."execution_attempt"."kind" = 'write' AND "actions"."execution_attempt"."prewrite_attempt_id" IS NOT NULL
 attempt_cycle_starts: INDEX (organization_id ASC, cycle_command_id ASC, started_at ASC, id ASC)
+attempt_unresolved_effect: INDEX (organization_id ASC, execution_id ASC) WHERE "actions"."execution_attempt"."kind" = 'conflicting_completion' OR ("actions"."execution_attempt"."kind" = 'write' AND NOT ("actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied' AND "actions"."execution_attempt"."non_application_basis" IS NOT DISTINCT FROM 'pre_dispatch_failure'))
 attempt_step_history: INDEX (organization_id ASC, execution_id ASC, step_id ASC, number ASC)
 attempt_subject_evidence: INDEX (organization_id ASC, subject_attempt_id ASC, kind ASC)
 attempt_conflict_monitor: INDEX (recorded_at ASC, organization_id ASC, id ASC) WHERE "actions"."execution_attempt"."kind" = 'conflicting_completion'
