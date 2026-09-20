@@ -1,8 +1,8 @@
 # Implemented Actions schema
 
-20 September 2026 · Local implementation snapshot; not production cutover.
+21 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0168: 21 relations, 355 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0169: 21 relations, 356 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -100,7 +100,7 @@ Who asked for what, when it was accepted, the immutable recovery-cycle scope and
 | --- | --- | --- | --- |
 | `id` | text | No | PK |
 | `organization_id` | text | No | FK → public.organization.id; FK → actions.command.organization_id; FK → actions.execution.organization_id; FK → actions.execution_step.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id |
-| `idempotency_key` | uuid | No | — |
+| `idempotency_key` | text | No | — |
 | `principal_kind` | principal_kind: user, api_key, agent, policy, system | No | — |
 | `actor_user_id` | text | Yes | FK → public.user.id |
 | `actor_acting_for_user_id` | text | Yes | FK → public.user.id |
@@ -139,6 +139,8 @@ Who asked for what, when it was accepted, the immutable recovery-cycle scope and
 ```sql
 execution_cycle_successor: UNIQUE INDEX (organization_id ASC, cycle_predecessor_command_id ASC) WHERE "actions"."command"."kind" IN ('reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
 execution_attempt_completion_command: UNIQUE INDEX (organization_id ASC, progress_subject_attempt_id ASC) WHERE "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted'
+execution_retry_subject_once: UNIQUE INDEX (organization_id ASC, progress_subject_attempt_id ASC) WHERE "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted'
+execution_retry_cycle_once: UNIQUE INDEX (organization_id ASC, progress_cycle_command_id ASC) WHERE "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted'
 command_history_page: INDEX (organization_id ASC, accepted_at DESC, "id" COLLATE "C" DESC ASC)
 command_execution_identity: UNIQUE (organization_id, progress_execution_id, id)
 command_execution_step_identity: UNIQUE (organization_id, progress_execution_id, progress_step_id, id)
@@ -156,6 +158,9 @@ command_subject_scope: (organization_id, progress_execution_id, progress_step_id
 command_planned_step_scope: (organization_id, progress_execution_id, cycle_planned_step_id) → actions.execution_step (organization_id, execution_id, id)
 command_cycle_predecessor_scope: (organization_id, cycle_predecessor_command_id) → actions.command (organization_id, id)
 command_instant_bounds: ("actions"."command"."accepted_at" IS NULL OR "actions"."command"."accepted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_anchor_at" IS NULL OR "actions"."command"."cycle_anchor_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."cycle_decisive_after_at" IS NULL OR "actions"."command"."cycle_decisive_after_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_next_run_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+command_idempotency_namespace: "actions"."command"."idempotency_key" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR
+          ("actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NOT DISTINCT FROM 'prewrite'
+            AND "actions"."command"."idempotency_key" ~ '^actions[.]retry-cycle:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
 command_cycle_shape: CASE
         WHEN "actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NULL THEN
           "actions"."command"."principal_kind" IN ('user','api_key')
@@ -174,6 +179,10 @@ command_cycle_shape: CASE
             WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             ELSE false END
+        WHEN "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."progress_cycle_command_id") = 4
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
           "actions"."command"."progress_execution_id" IS NOT NULL
           AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
@@ -205,6 +214,8 @@ command_progress_snapshot_shape: (CASE
             WHEN "actions"."command"."progress_exhaustion_reason" IN ('binding_observation_budget','prewrite_observation_budget') THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
             WHEN "actions"."command"."progress_exhaustion_reason" = 'readback_observation_budget' THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
             ELSE "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL END
+        WHEN "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_cycle_command_id" IS NOT NULL AND num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at") = 0
         ELSE num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at", "actions"."command"."progress_cycle_command_id") = 0
         END) IS TRUE
 command_cycle_not_own_predecessor: "actions"."command"."id" IS DISTINCT FROM "actions"."command"."cycle_predecessor_command_id"
@@ -484,9 +495,9 @@ One admitted interaction, its fence, and its retained outcome. It is not a queue
 | Field | SQL type / enum | Nullable | Key / default |
 | --- | --- | --- | --- |
 | `id` | text | No | PK |
-| `organization_id` | text | No | FK → actions.execution_step.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id; FK → actions.command.organization_id; FK → actions.revision.organization_id; FK → actions.revision.organization_id; FK → actions.revision.organization_id |
-| `execution_id` | text | No | FK → actions.execution_step.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_step.execution_id; FK → actions.command.progress_execution_id |
-| `step_id` | text | No | FK → actions.execution_step.id; FK → actions.execution_attempt.step_id; FK → actions.command.progress_step_id |
+| `organization_id` | text | No | FK → actions.execution_step.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.command.organization_id; FK → actions.execution_attempt.organization_id; FK → actions.execution_step.organization_id; FK → actions.command.organization_id; FK → actions.command.organization_id; FK → actions.revision.organization_id; FK → actions.revision.organization_id; FK → actions.revision.organization_id |
+| `execution_id` | text | No | FK → actions.execution_step.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_attempt.execution_id; FK → actions.command.progress_execution_id; FK → actions.execution_attempt.execution_id; FK → actions.execution_step.execution_id; FK → actions.command.progress_execution_id |
+| `step_id` | text | No | FK → actions.execution_step.id; FK → actions.execution_attempt.step_id; FK → actions.command.progress_step_id; FK → actions.command.progress_step_id |
 | `number` | integer | No | — |
 | `kind` | attempt_kind: write, readback, inspection, generation, manual_observation, late_evidence, conflicting_completion | No | — |
 | `claim_generation` | bigint | No | — |
@@ -519,6 +530,7 @@ One admitted interaction, its fence, and its retained outcome. It is not a queue
 | `inspection_purpose` | inspection_purpose: binding, prewrite | Yes | — |
 | `planned_write_step_id` | text | Yes | FK → actions.execution_step.id |
 | `prewrite_attempt_id` | text | Yes | FK → actions.execution_attempt.id |
+| `retry_command_id` | text | Yes | FK → actions.command.id |
 | `resource_guard_generation` | bigint | Yes | — |
 | `cycle_command_id` | text | Yes | FK → actions.command.id |
 | `evidence_command_id` | text | Yes | FK → actions.command.id |
@@ -534,6 +546,7 @@ One admitted interaction, its fence, and its retained outcome. It is not a queue
 attempt_one_unfinished: UNIQUE INDEX (organization_id ASC, execution_id ASC) WHERE "actions"."execution_attempt"."finished_at" IS NULL AND "actions"."execution_attempt"."kind" IN ('write','readback','inspection','generation','manual_observation')
 attempt_one_late_completion: UNIQUE INDEX (organization_id ASC, subject_attempt_id ASC) WHERE "actions"."execution_attempt"."kind" = 'late_evidence'
 attempt_conflicting_capture_replay: UNIQUE INDEX (organization_id ASC, subject_attempt_id ASC, capture_digest_version ASC, capture_digest ASC) WHERE "actions"."execution_attempt"."kind" = 'conflicting_completion'
+attempt_retry_consumed_once: UNIQUE INDEX (organization_id ASC, retry_command_id ASC) WHERE "actions"."execution_attempt"."kind" = 'write' AND "actions"."execution_attempt"."retry_command_id" IS NOT NULL
 attempt_prewrite_consumed_once: UNIQUE INDEX (organization_id ASC, prewrite_attempt_id ASC) WHERE "actions"."execution_attempt"."kind" = 'write' AND "actions"."execution_attempt"."prewrite_attempt_id" IS NOT NULL
 attempt_cycle_starts: INDEX (organization_id ASC, cycle_command_id ASC, started_at ASC, id ASC)
 attempt_unresolved_effect: INDEX (organization_id ASC, execution_id ASC) WHERE "actions"."execution_attempt"."kind" = 'conflicting_completion' OR ("actions"."execution_attempt"."kind" = 'write' AND NOT ("actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied' AND "actions"."execution_attempt"."non_application_basis" IS NOT DISTINCT FROM 'pre_dispatch_failure'))
@@ -549,6 +562,7 @@ attempt_number_unique: UNIQUE (organization_id, step_id, number)
 attempt_step_scope: (organization_id, execution_id, step_id) → actions.execution_step (organization_id, execution_id, id)
 attempt_subject_scope: (organization_id, execution_id, step_id, subject_attempt_id) → actions.execution_attempt (organization_id, execution_id, step_id, id)
 attempt_input_scope: (organization_id, execution_id, input_attempt_id) → actions.execution_attempt (organization_id, execution_id, id)
+attempt_retry_scope: (organization_id, execution_id, step_id, retry_command_id) → actions.command (organization_id, progress_execution_id, progress_step_id, id)
 attempt_prewrite_scope: (organization_id, execution_id, prewrite_attempt_id) → actions.execution_attempt (organization_id, execution_id, id)
 attempt_planned_write_scope: (organization_id, execution_id, planned_write_step_id) → actions.execution_step (organization_id, execution_id, id)
 attempt_cycle_scope: (organization_id, execution_id, step_id, cycle_command_id) → actions.command (organization_id, progress_execution_id, progress_step_id, id)
@@ -556,6 +570,7 @@ attempt_evidence_command_scope: (organization_id, evidence_command_id) → actio
 attempt_observation_scope: (organization_id, observation_revision_id) → actions.revision (organization_id, id)
 attempt_parent_revision_scope: (organization_id, input_parent_revision_id) → actions.revision (organization_id, id)
 attempt_output_revision_scope: (organization_id, output_revision_id) → actions.revision (organization_id, id)
+attempt_retry_shape: "actions"."execution_attempt"."retry_command_id" IS NULL OR "actions"."execution_attempt"."kind" IN ('inspection','write','late_evidence','conflicting_completion')
 attempt_identity_nonempty: length("actions"."execution_attempt"."id") > 0 AND length("actions"."execution_attempt"."execution_id") > 0 AND length("actions"."execution_attempt"."step_id") > 0
 attempt_counters: "actions"."execution_attempt"."number" > 0 AND "actions"."execution_attempt"."claim_generation" > 0 AND ("actions"."execution_attempt"."finalized_claim_generation" IS NULL OR "actions"."execution_attempt"."finalized_claim_generation" > 0) AND ("actions"."execution_attempt"."resource_guard_generation" IS NULL OR "actions"."execution_attempt"."resource_guard_generation" > 0)
 attempt_finish_shape: ("actions"."execution_attempt"."finished_at" IS NULL) = ("actions"."execution_attempt"."result" IS NULL) AND ("actions"."execution_attempt"."finished_at" IS NULL OR "actions"."execution_attempt"."finished_at" >= "actions"."execution_attempt"."started_at")
@@ -579,7 +594,7 @@ attempt_inspection_shape: "actions"."execution_attempt"."kind" IN ('late_evidenc
     AND ("actions"."execution_attempt"."inspection_purpose" IS NOT DISTINCT FROM 'prewrite') = ("actions"."execution_attempt"."planned_write_step_id" IS NOT NULL)
     AND ("actions"."execution_attempt"."kind" = 'readback' OR ("actions"."execution_attempt"."kind" = 'write' OR "actions"."execution_attempt"."inspection_purpose" IS NOT DISTINCT FROM 'prewrite') = ("actions"."execution_attempt"."resource_guard_generation" IS NOT NULL))
     AND ("actions"."execution_attempt"."prewrite_attempt_id" IS NULL OR "actions"."execution_attempt"."kind" = 'write'))
-attempt_capture_shape: ("actions"."execution_attempt"."kind" = 'conflicting_completion') = ("actions"."execution_attempt"."capture_digest" IS NOT NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL) = ("actions"."execution_attempt"."capture_digest_version" IS NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL OR ("actions"."execution_attempt"."capture_digest" ~ '^[0-9a-f]{64}$' AND "actions"."execution_attempt"."capture_digest_version" IN (1,2,3)))
+attempt_capture_shape: ("actions"."execution_attempt"."kind" = 'conflicting_completion') = ("actions"."execution_attempt"."capture_digest" IS NOT NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL) = ("actions"."execution_attempt"."capture_digest_version" IS NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL OR ("actions"."execution_attempt"."capture_digest" ~ '^[0-9a-f]{64}$' AND "actions"."execution_attempt"."capture_digest_version" IN (1,2,3,4)))
 attempt_fence_shape: CASE WHEN "actions"."execution_attempt"."kind" IN ('late_evidence','conflicting_completion') THEN "actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."finalized_claim_generation" IS NULL AND "actions"."execution_attempt"."finalized_claim_token" IS NULL ELSE ("actions"."execution_attempt"."finished_at" IS NOT NULL) = ("actions"."execution_attempt"."finalized_claim_generation" IS NOT NULL) AND ("actions"."execution_attempt"."finalized_claim_generation" IS NULL) = ("actions"."execution_attempt"."finalized_claim_token" IS NULL) END
 attempt_evidence_command_shape: CASE WHEN "actions"."execution_attempt"."kind" IN ('late_evidence','conflicting_completion','manual_observation') THEN "actions"."execution_attempt"."evidence_command_id" IS NOT NULL AND "actions"."execution_attempt"."finished_at" IS NOT NULL WHEN "actions"."execution_attempt"."kind" = 'inspection' AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'unreadable' AND "actions"."execution_attempt"."unreadable_reason" IS NOT DISTINCT FROM 'cancelled' THEN "actions"."execution_attempt"."evidence_command_id" IS NOT NULL AND "actions"."execution_attempt"."finished_at" IS NOT NULL ELSE "actions"."execution_attempt"."evidence_command_id" IS NULL END
 attempt_unfinished_empty: "actions"."execution_attempt"."finished_at" IS NOT NULL OR num_nonnulls("actions"."execution_attempt"."failure_class","actions"."execution_attempt"."terminal_outcome","actions"."execution_attempt"."semantic_fingerprint","actions"."execution_attempt"."fingerprint_version","actions"."execution_attempt"."observation_revision_id","actions"."execution_attempt"."output_kind") = 0

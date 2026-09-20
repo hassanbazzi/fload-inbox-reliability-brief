@@ -4379,3 +4379,421 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+-- 0169_asc_explicit_effect_retry.sql
+-- Explicit Actions maintenance migration: UUID-to-text rewrites command storage
+-- and replay indexes. Every statement has a 60s execution bound and a 5s
+-- lock-wait bound, including the three new partial unique indexes. These are
+-- per-statement bounds, not a total transaction deadline or an online migration.
+-- See docs/actions-effect-retry.md before applying to a populated installation.
+DO $retry_maintenance$
+BEGIN
+  PERFORM set_config('fload.retry_previous_lock_timeout',current_setting('lock_timeout'),true);
+  PERFORM set_config('fload.retry_previous_statement_timeout',current_setting('statement_timeout'),true);
+  PERFORM set_config('lock_timeout','5s',true);
+  PERFORM set_config('statement_timeout','60s',true);
+END $retry_maintenance$;
+--> statement-breakpoint
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_cycle_shape";--> statement-breakpoint
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_progress_snapshot_shape";--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" DROP CONSTRAINT "attempt_capture_shape";--> statement-breakpoint
+ALTER TABLE "actions"."command" ALTER COLUMN "idempotency_key" SET DATA TYPE text USING "idempotency_key"::text;--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" ADD COLUMN "retry_command_id" text;--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" ADD CONSTRAINT "attempt_retry_scope" FOREIGN KEY ("organization_id","execution_id","step_id","retry_command_id") REFERENCES "actions"."command"("organization_id","progress_execution_id","progress_step_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "execution_retry_subject_once" ON "actions"."command" USING btree ("organization_id","progress_subject_attempt_id") WHERE "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted';--> statement-breakpoint
+CREATE UNIQUE INDEX "execution_retry_cycle_once" ON "actions"."command" USING btree ("organization_id","progress_cycle_command_id") WHERE "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted';--> statement-breakpoint
+CREATE UNIQUE INDEX "attempt_retry_consumed_once" ON "actions"."execution_attempt" USING btree ("organization_id","retry_command_id") WHERE "actions"."execution_attempt"."kind" = 'write' AND "actions"."execution_attempt"."retry_command_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_idempotency_namespace" CHECK ("actions"."command"."idempotency_key" ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR
+          ("actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NOT DISTINCT FROM 'prewrite'
+            AND "actions"."command"."idempotency_key" ~ '^actions[.]retry-cycle:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'));--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_cycle_shape" CHECK (CASE
+        WHEN "actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NULL THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND "actions"."command"."progress_execution_id" IS NOT NULL AND "actions"."command"."progress_step_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
+          AND CASE "actions"."command"."kind"
+            WHEN 'open_recovery' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NULL
+            WHEN 'reconcile' THEN "actions"."command"."principal_kind" IN ('user','api_key') AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            WHEN 'resume_hold' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            ELSE false END
+          AND CASE "actions"."command"."cycle_purpose"
+            WHEN 'binding' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'prewrite' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NOT NULL
+            WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            ELSE false END
+        WHEN "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."progress_cycle_command_id") = 4
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_execution_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        END);--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_progress_snapshot_shape" CHECK ((CASE
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND "actions"."command"."progress_phase" IS NOT NULL AND "actions"."command"."progress_phase" IN ('verification_due','uncertain','blocked','settled')
+          AND ("actions"."command"."progress_phase" = 'settled') = ("actions"."command"."progress_result" IS NOT NULL)
+          AND "actions"."command"."progress_result" IS DISTINCT FROM 'cancelled'
+          AND ("actions"."command"."progress_phase" IN ('blocked','uncertain')) = ("actions"."command"."progress_hold_reason" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" <> 'uncertain' OR "actions"."command"."progress_hold_reason" IS NOT DISTINCT FROM 'uncertain_write')
+          AND ("actions"."command"."progress_phase" IN ('blocked','uncertain') OR ("actions"."command"."progress_phase" = 'settled' AND "actions"."command"."progress_result" IS NOT DISTINCT FROM 'failed')) = ("actions"."command"."progress_resolution_owner" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" NOT IN ('verification_due','uncertain') OR "actions"."command"."progress_next_run_at" IS NOT NULL)
+          AND ("actions"."command"."progress_phase" <> 'settled' OR "actions"."command"."progress_next_run_at" IS NULL)
+          AND ("actions"."command"."progress_phase" <> 'blocked' OR "actions"."command"."progress_next_run_at" IS NULL OR "actions"."command"."progress_hold_reason" IN ('awaiting_release','awaiting_publication','resource_busy','evidence_conflict'))
+          AND CASE
+            WHEN "actions"."command"."progress_hold_reason" IS NOT DISTINCT FROM 'retry_exhausted' THEN "actions"."command"."progress_exhaustion_reason" IS NOT NULL
+            WHEN "actions"."command"."progress_hold_reason" IN ('awaiting_release','awaiting_publication') AND "actions"."command"."progress_resolution_owner" = 'client' THEN
+              "actions"."command"."progress_next_run_at" IS NULL AND "actions"."command"."progress_exhaustion_reason" IS NOT DISTINCT FROM CASE WHEN "actions"."command"."progress_hold_reason" = 'awaiting_release' THEN 'binding_observation_budget'::actions.execution_exhaustion_reason ELSE 'readback_observation_budget'::actions.execution_exhaustion_reason END
+            ELSE "actions"."command"."progress_exhaustion_reason" IS NULL END
+          AND CASE
+            WHEN "actions"."command"."progress_exhaustion_reason" IS NULL THEN num_nonnulls("actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 0
+            WHEN "actions"."command"."progress_exhaustion_reason" IN ('binding_observation_budget','prewrite_observation_budget') THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
+            WHEN "actions"."command"."progress_exhaustion_reason" = 'readback_observation_budget' THEN "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."progress_cycle_command_id" IS NOT NULL
+            ELSE "actions"."command"."progress_step_id" IS NOT NULL AND "actions"."command"."progress_subject_attempt_id" IS NOT NULL END
+        WHEN "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_cycle_command_id" IS NOT NULL AND num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at") = 0
+        ELSE num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at", "actions"."command"."progress_cycle_command_id") = 0
+        END) IS TRUE);--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" ADD CONSTRAINT "attempt_retry_shape" CHECK ("actions"."execution_attempt"."retry_command_id" IS NULL OR "actions"."execution_attempt"."kind" IN ('inspection','write','late_evidence','conflicting_completion'));--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" ADD CONSTRAINT "attempt_capture_shape" CHECK (("actions"."execution_attempt"."kind" = 'conflicting_completion') = ("actions"."execution_attempt"."capture_digest" IS NOT NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL) = ("actions"."execution_attempt"."capture_digest_version" IS NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL OR ("actions"."execution_attempt"."capture_digest" ~ '^[0-9a-f]{64}$' AND "actions"."execution_attempt"."capture_digest_version" IN (1,2,3,4))));
+--> statement-breakpoint
+CREATE FUNCTION actions.cycle_descends_from(org text, ex text, step text, child text, ancestor text) RETURNS boolean LANGUAGE sql STABLE AS $$
+  WITH RECURSIVE lineage AS (
+    SELECT id,cycle_predecessor_command_id FROM actions.command WHERE organization_id=org AND progress_execution_id=ex AND progress_step_id=step AND id=child AND outcome='accepted' AND cycle_purpose='prewrite'
+    UNION ALL
+    SELECT c.id,c.cycle_predecessor_command_id FROM actions.command c JOIN lineage l ON c.id=l.cycle_predecessor_command_id
+    WHERE c.organization_id=org AND c.progress_execution_id=ex AND c.progress_step_id=step AND c.outcome='accepted' AND c.cycle_purpose='prewrite'
+  ) SELECT EXISTS(SELECT 1 FROM lineage WHERE id=ancestor)
+$$;
+--> statement-breakpoint
+CREATE FUNCTION actions.retry_cycle_owner(c actions.command) RETURNS text LANGUAGE plpgsql STABLE AS $$
+DECLARE r actions.command;
+BEGIN
+ IF c.kind IS DISTINCT FROM 'reconcile' OR c.outcome IS DISTINCT FROM 'accepted' OR c.cycle_purpose IS DISTINCT FROM 'prewrite'
+   OR c.idempotency_key NOT LIKE 'actions.retry-cycle:%' THEN RETURN NULL; END IF;
+ SELECT * INTO r FROM actions.command WHERE organization_id=c.organization_id AND id=substring(c.idempotency_key FROM 21)
+   AND kind='retry' AND outcome='accepted' AND progress_cycle_command_id=c.id;
+ IF r.id IS NULL OR c.cycle_predecessor_command_id IS NULL OR c.progress_subject_attempt_id IS NOT NULL
+   OR c.cycle_planned_step_id IS DISTINCT FROM c.progress_step_id
+   OR ROW(r.progress_execution_id,r.progress_step_id,r.accepted_at,r.principal_kind,r.actor_user_id,r.actor_acting_for_user_id,r.actor_api_key_id,r.actor_agent_run_id,r.actor_policy_revision_id,r.actor_subject_snapshot,r.actor_name_snapshot,r.channel,r.external_actor_id)
+     IS DISTINCT FROM ROW(c.progress_execution_id,c.progress_step_id,c.accepted_at,c.principal_kind,c.actor_user_id,c.actor_acting_for_user_id,c.actor_api_key_id,c.actor_agent_run_id,c.actor_policy_revision_id,c.actor_subject_snapshot,c.actor_name_snapshot,c.channel,c.external_actor_id)
+   THEN RAISE EXCEPTION 'Internal inspection renewal requires its exact same-actor accepted Retry' USING ERRCODE='23514'; END IF;
+ RETURN r.id;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.check_command_targets() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.idempotency_key LIKE 'actions.retry-cycle:%' THEN
+    IF actions.retry_cycle_owner(NEW) IS NULL OR EXISTS(SELECT 1 FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=NEW.id) THEN
+      RAISE EXCEPTION 'Retry inspection renewal is targetless only beside its exact accepted effect permission' USING ERRCODE='23514';
+    END IF;
+  ELSIF NEW.outcome='accepted' AND NEW.kind='open_recovery' AND NEW.principal_kind='system'
+    AND NEW.cycle_purpose IS NOT NULL AND NEW.progress_execution_id IS NOT NULL AND NEW.progress_step_id IS NOT NULL
+    AND NEW.cycle_contract_id IS NOT NULL AND NEW.cycle_anchor_at IS NOT NULL AND NEW.cycle_predecessor_command_id IS NULL THEN
+    IF EXISTS (SELECT 1 FROM actions.command_target t WHERE t.organization_id=NEW.organization_id AND t.command_id=NEW.id) THEN
+      RAISE EXCEPTION 'Initial recovery commands are targetless and cannot mutate ticket history' USING ERRCODE='23514';
+    END IF;
+  ELSIF NEW.outcome='accepted' AND NOT EXISTS (
+    SELECT 1 FROM actions.command_target t WHERE t.organization_id=NEW.organization_id AND t.command_id=NEW.id
+  ) THEN
+    RAISE EXCEPTION 'An accepted ticket command requires durable targets' USING ERRCODE='23514';
+  END IF;
+  IF NEW.outcome<>'accepted' AND EXISTS (
+    SELECT 1 FROM actions.command_target t WHERE t.organization_id=NEW.organization_id AND t.command_id=NEW.id
+  ) THEN
+    RAISE EXCEPTION 'Refused commands cannot mutate tickets' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.check_target_snapshot() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM actions.command c WHERE c.organization_id=NEW.organization_id
+    AND c.id=NEW.command_id AND (c.kind='open_recovery' OR c.idempotency_key LIKE 'actions.retry-cycle:%')) THEN
+    RAISE EXCEPTION 'Initial recovery commands are targetless and cannot mutate ticket history' USING ERRCODE='23514';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM actions.action a JOIN actions.command c ON c.organization_id=a.organization_id AND c.id=NEW.command_id
+    WHERE a.organization_id=NEW.organization_id AND a.id=NEW.action_id AND a.version>=NEW.result_version AND c.outcome='accepted') THEN
+    RAISE EXCEPTION 'Command targets must describe committed ticket versions' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.check_recovery_cycle_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE ticket_id text;
+BEGIN
+  IF NEW.outcome<>'accepted' OR NEW.cycle_purpose IS NULL THEN RETURN NULL; END IF;
+  SELECT ap.action_id INTO ticket_id FROM actions.execution e JOIN actions.approval ap
+    ON ap.organization_id=e.organization_id AND ap.id=e.approval_id
+    WHERE e.organization_id=NEW.organization_id AND e.id=NEW.progress_execution_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Recovery history requires its exact execution approval and ticket' USING ERRCODE='23514'; END IF;
+  IF NEW.idempotency_key LIKE 'actions.retry-cycle:%' THEN
+    IF actions.retry_cycle_owner(NEW) IS NULL THEN RAISE EXCEPTION 'Retry cycle lost its accepted effect permission' USING ERRCODE='23514'; END IF;
+  ELSIF NEW.kind<>'open_recovery' AND NOT EXISTS (
+    SELECT 1 FROM actions.command_target t WHERE t.organization_id=NEW.organization_id AND t.command_id=NEW.id AND t.action_id=ticket_id
+  ) THEN
+    RAISE EXCEPTION 'Recovery replacement requires its exact ticket history target' USING ERRCODE='23514';
+  END IF;
+  IF NEW.kind='open_recovery' AND NEW.cycle_purpose IN ('binding','prewrite') AND NOT EXISTS (
+    SELECT 1 FROM actions.execution_attempt a WHERE a.organization_id=NEW.organization_id
+      AND a.execution_id=NEW.progress_execution_id AND a.step_id=NEW.progress_step_id
+      AND a.cycle_command_id=NEW.id AND a.kind='inspection'
+      AND a.inspection_purpose::text=NEW.cycle_purpose::text
+      AND a.planned_write_step_id IS NOT DISTINCT FROM NEW.cycle_planned_step_id
+      AND a.started_at=NEW.cycle_anchor_at
+  ) THEN
+    RAISE EXCEPTION 'Initial inspection cycle requires its atomic first admission at the anchor' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION actions.check_effect_retry_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; ap actions.approval; w actions.execution_attempt; i actions.execution_attempt; c actions.command; t actions.command_target;
+BEGIN
+ IF NEW.kind<>'retry' OR NEW.outcome<>'accepted' THEN RETURN NULL; END IF;
+ SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.progress_execution_id;
+ SELECT * INTO ap FROM actions.approval WHERE organization_id=NEW.organization_id AND id=e.approval_id;
+ SELECT * INTO w FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND execution_id=e.id AND step_id=NEW.progress_step_id AND id=NEW.progress_subject_attempt_id;
+ SELECT * INTO i FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND execution_id=e.id AND step_id=NEW.progress_step_id AND id=w.prewrite_attempt_id;
+ SELECT * INTO c FROM actions.command WHERE organization_id=NEW.organization_id AND id=NEW.progress_cycle_command_id;
+ SELECT * INTO t FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=NEW.id AND action_id=ap.action_id;
+ IF e.id IS NULL OR ap.id IS NULL OR w.id IS NULL OR i.id IS NULL OR c.id IS NULL OR t.action_id IS NULL
+   OR w.kind IS DISTINCT FROM 'write' OR w.finished_at IS NULL OR w.finished_at>NEW.accepted_at
+   OR i.kind IS DISTINCT FROM 'inspection' OR i.cycle_command_id IS NULL
+   OR actions.retry_cycle_owner(c) IS DISTINCT FROM NEW.id
+   OR NOT actions.cycle_descends_from(NEW.organization_id,e.id,NEW.progress_step_id,c.cycle_predecessor_command_id,i.cycle_command_id)
+   OR NOT EXISTS(SELECT 1 FROM actions.execution_step s WHERE s.organization_id=NEW.organization_id AND s.execution_id=e.id AND s.id=NEW.progress_step_id AND s.content_revision_id=ap.revision_id)
+   OR (SELECT count(*) FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=NEW.id)<>1
+   OR t.expected_version IS DISTINCT FROM t.previous_version OR t.expected_parent_revision_id IS NOT NULL
+   OR t.expected_revision_id IS DISTINCT FROM ap.revision_id
+   OR ROW(t.previous_approval_id,t.result_approval_id,t.previous_revision_id,t.result_revision_id,t.previous_decision,t.result_decision)
+      IS DISTINCT FROM ROW(ap.id,ap.id,ap.revision_id,ap.revision_id,'approved'::actions.decision,'approved'::actions.decision)
+   OR e.phase IS DISTINCT FROM 'ready' OR e.next_step_id IS DISTINCT FROM NEW.progress_step_id OR e.next_run_at IS DISTINCT FROM NEW.accepted_at
+   OR e.current_progress_command_id IS NOT NULL OR e.writes_closed_at IS NOT NULL OR e.claim_token IS NOT NULL
+   OR EXISTS(SELECT 1 FROM actions.execution_attempt a WHERE a.organization_id=NEW.organization_id AND a.execution_id=e.id AND (a.retry_command_id=NEW.id OR a.kind IN ('generation','conflicting_completion') OR (a.kind IN ('write','inspection','readback','manual_observation') AND a.finished_at IS NULL)))
+ THEN RAISE EXCEPTION 'Retry requires one exact user target and atomic unused inspection renewal on its retained approved write' USING ERRCODE='23514'; END IF;
+ -- Native/effective proof and retry policy belong to the canonical provider/Core
+ -- writer. SQL proves only exact retained scope, shape and one-use ancestry.
+ RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER command_effect_retry_commit AFTER INSERT ON actions.command DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_effect_retry_commit();
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.guard_execution_attempt() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; g actions.resource_guard;
+BEGIN
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Attempt deletion requires erasure authority' USING ERRCODE='23514'; END IF;
+  SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.execution_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Attempt requires its exact execution' USING ERRCODE='23514'; END IF;
+  IF TG_OP='UPDATE' THEN
+    IF OLD.finished_at IS NOT NULL THEN RAISE EXCEPTION 'Finished attempt is immutable' USING ERRCODE='23514'; END IF;
+    IF ROW(NEW.id,NEW.organization_id,NEW.execution_id,NEW.step_id,NEW.number,NEW.kind,NEW.claim_generation,NEW.claim_token,NEW.subject_attempt_id,NEW.input_attempt_id,NEW.input_parent_revision_id,NEW.connector_id,NEW.agent_run_id,NEW.started_at,NEW.recorded_at,NEW.inspection_purpose,NEW.planned_write_step_id,NEW.prewrite_attempt_id,NEW.retry_command_id,NEW.resource_guard_generation,NEW.cycle_command_id,NEW.capture_digest,NEW.capture_digest_version)
+      IS DISTINCT FROM ROW(OLD.id,OLD.organization_id,OLD.execution_id,OLD.step_id,OLD.number,OLD.kind,OLD.claim_generation,OLD.claim_token,OLD.subject_attempt_id,OLD.input_attempt_id,OLD.input_parent_revision_id,OLD.connector_id,OLD.agent_run_id,OLD.started_at,OLD.recorded_at,OLD.inspection_purpose,OLD.planned_write_step_id,OLD.prewrite_attempt_id,OLD.retry_command_id,OLD.resource_guard_generation,OLD.cycle_command_id,OLD.capture_digest,OLD.capture_digest_version) THEN
+      RAISE EXCEPTION 'Attempt admission identity is immutable' USING ERRCODE='23514';
+    END IF;
+    IF NEW.finished_at IS NULL THEN RAISE EXCEPTION 'An original attempt can only be updated to finalize once' USING ERRCODE='23514'; END IF;
+  ELSE
+    IF NEW.kind IN ('write','readback','inspection','generation') AND NEW.finished_at IS NOT NULL THEN
+      RAISE EXCEPTION 'Original worker attempts must be durably admitted unfinished' USING ERRCODE='23514';
+    END IF;
+    IF NEW.kind NOT IN ('late_evidence','conflicting_completion') AND NEW.connector_id IS NOT NULL THEN
+      PERFORM 1 FROM public.data_connector c WHERE c.id=NEW.connector_id AND c."organizationId"=NEW.organization_id FOR KEY SHARE;
+      IF NOT FOUND THEN RAISE EXCEPTION 'Attempt connector must exist in its tenant at admission' USING ERRCODE='23514'; END IF;
+    END IF;
+    IF NEW.kind NOT IN ('late_evidence','conflicting_completion') AND NEW.agent_run_id IS NOT NULL THEN
+      PERFORM 1 FROM public.agent_run r WHERE r.id=NEW.agent_run_id AND r."organizationId"=NEW.organization_id FOR KEY SHARE;
+      IF NOT FOUND THEN RAISE EXCEPTION 'Attempt run must exist in its tenant at admission' USING ERRCODE='23514'; END IF;
+    END IF;
+  END IF;
+  PERFORM actions.check_write_capture_shape(NEW);
+  PERFORM composition.check_execution_attempt_owner(NEW);
+  -- Evidence keeps the original fence; a later worker claim has no authority over it.
+  IF NEW.kind IN ('late_evidence','conflicting_completion') THEN RETURN NEW; END IF;
+  IF TG_OP='INSERT' AND EXISTS(SELECT 1 FROM actions.execution_attempt c WHERE c.organization_id=NEW.organization_id AND c.execution_id=NEW.execution_id AND c.kind='conflicting_completion') THEN
+    RAISE EXCEPTION 'Unresolved capture conflict forbids new automatic interactions' USING ERRCODE='23514';
+  END IF;
+  IF e.phase<>'claimed' OR e.claim_token IS NULL OR e.claim_expires_at IS NULL THEN
+    RAISE EXCEPTION 'Original attempt requires the execution claim' USING ERRCODE='23514';
+  END IF;
+  IF TG_OP='INSERT' THEN
+    -- Current-cycle admission is checked only when issuing a new original.
+    -- A later cycle handoff must not prevent retaining an already-issued read.
+    IF NEW.kind IN ('readback','inspection') AND EXISTS(SELECT 1 FROM actions.command c
+      WHERE c.organization_id=NEW.organization_id AND c.cycle_predecessor_command_id=NEW.cycle_command_id) THEN
+      RAISE EXCEPTION 'Read admission requires the current recovery cycle' USING ERRCODE='23514';
+    END IF;
+    IF NEW.claim_generation<>e.claim_generation OR NEW.claim_token<>e.claim_token OR clock_timestamp()>=e.claim_expires_at THEN
+      RAISE EXCEPTION 'Attempt admission fence must be current and unexpired' USING ERRCODE='23514';
+    END IF;
+    IF e.writes_closed_at IS NOT NULL AND (NEW.kind='write' OR (NEW.kind='inspection' AND NEW.inspection_purpose='prewrite')) THEN
+      RAISE EXCEPTION 'Closed effect plans cannot admit another write or prewrite' USING ERRCODE='23514';
+    END IF;
+    IF NEW.kind='readback' AND NEW.resource_guard_generation IS NULL THEN
+      RAISE EXCEPTION 'Fresh readback requires its exact resource generation' USING ERRCODE='23514';
+    END IF;
+    IF NEW.kind IN ('write','readback') OR (NEW.kind='inspection' AND NEW.inspection_purpose='prewrite') THEN
+      SELECT * INTO g FROM actions.resource_guard WHERE id=e.resource_guard_id FOR UPDATE;
+      IF NOT FOUND OR g.holder_organization_id IS DISTINCT FROM e.organization_id OR g.holder_execution_id IS DISTINCT FROM e.id OR g.acquisition_generation IS DISTINCT FROM NEW.resource_guard_generation THEN
+        RAISE EXCEPTION 'Write requires the exact held resource generation' USING ERRCODE='23514';
+      END IF;
+    END IF;
+  ELSE
+    IF NEW.kind='readback' AND NEW.resource_guard_generation IS NOT NULL THEN
+      SELECT * INTO g FROM actions.resource_guard WHERE id=e.resource_guard_id FOR UPDATE;
+      IF NOT FOUND OR g.holder_organization_id IS DISTINCT FROM e.organization_id OR g.holder_execution_id IS DISTINCT FROM e.id OR g.acquisition_generation IS DISTINCT FROM NEW.resource_guard_generation THEN
+        RAISE EXCEPTION 'Read finalization requires its exact held resource generation' USING ERRCODE='23514';
+      END IF;
+    END IF;
+    IF NEW.finalized_claim_generation IS DISTINCT FROM e.claim_generation OR NEW.finalized_claim_token IS DISTINCT FROM e.claim_token
+      OR (clock_timestamp()>=e.claim_expires_at AND NOT (
+        (NEW.kind='write' AND NEW.result IS NOT DISTINCT FROM 'uncertain' AND NEW.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired')
+        OR (NEW.kind IN ('readback','inspection') AND NEW.result IS NOT DISTINCT FROM 'unreadable' AND NEW.unreadable_reason::text IS NOT DISTINCT FROM 'claim_expired'))) THEN
+      RAISE EXCEPTION 'Attempt finalization requires the exact current fence' USING ERRCODE='23514';
+    END IF;
+    -- Expiry is database-only uncertainty, never a claim that the write failed.
+    IF ((NEW.kind='write' AND NEW.result='uncertain' AND NEW.uncertainty_reason='claim_expired') OR
+      (NEW.kind IN ('readback','inspection') AND NEW.result='unreadable' AND NEW.unreadable_reason::text='claim_expired')) AND clock_timestamp()<e.claim_expires_at THEN
+      RAISE EXCEPTION 'A live claim cannot be classified as expired' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.check_write_capture_shape(candidate actions.execution_attempt) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE original actions.execution_attempt;
+BEGIN
+  IF candidate.kind IN ('write','late_evidence','conflicting_completion') AND candidate.finished_at IS NOT NULL THEN
+    IF (candidate.result='acknowledged' AND candidate.failure_class IS NOT NULL)
+      OR (candidate.result='known_not_applied' AND candidate.failure_class IS NULL)
+      OR (candidate.result='uncertain' AND candidate.uncertainty_reason IS DISTINCT FROM 'claim_expired' AND candidate.failure_class IS NULL)
+      OR (candidate.result='uncertain' AND candidate.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired' AND candidate.failure_class IS NOT NULL) THEN
+      RAISE EXCEPTION 'Write outcome requires its closed failure-class shape' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  IF candidate.kind NOT IN ('late_evidence','conflicting_completion') THEN RETURN; END IF;
+  SELECT * INTO original FROM actions.execution_attempt
+    WHERE organization_id=candidate.organization_id AND execution_id=candidate.execution_id
+      AND step_id=candidate.step_id AND id=candidate.subject_attempt_id;
+  IF NOT FOUND OR original.kind NOT IN ('write','readback','inspection') OR candidate.number<=original.number THEN
+    RAISE EXCEPTION 'Write capture requires its exact earlier original write' USING ERRCODE='23514';
+  END IF;
+  IF ROW(candidate.claim_generation,candidate.claim_token,candidate.started_at,candidate.connector_id,
+      candidate.agent_run_id,candidate.input_attempt_id,candidate.input_parent_revision_id,
+      candidate.inspection_purpose,candidate.planned_write_step_id,candidate.prewrite_attempt_id,candidate.retry_command_id,
+      candidate.resource_guard_generation)
+    IS DISTINCT FROM ROW(original.claim_generation,original.claim_token,original.started_at,original.connector_id,
+      original.agent_run_id,original.input_attempt_id,original.input_parent_revision_id,
+      original.inspection_purpose,original.planned_write_step_id,original.prewrite_attempt_id,original.retry_command_id,
+      original.resource_guard_generation) THEN
+    RAISE EXCEPTION 'Write capture must preserve the complete original admission identity' USING ERRCODE='23514';
+  END IF;
+  IF original.kind IN ('readback','inspection') THEN
+    IF original.finished_at IS NULL OR candidate.finished_at IS NULL OR candidate.finished_at>candidate.recorded_at
+      OR candidate.result IS NULL OR candidate.result NOT IN ('matched','mismatch','unreadable')
+      OR candidate.unreadable_reason::text IS NOT DISTINCT FROM 'claim_expired'
+      OR candidate.failure_class IS NOT NULL
+      OR num_nonnulls(candidate.output_kind,candidate.output_revision_id,candidate.output_review_analysis_id,candidate.output_agent_run_id,candidate.no_work_reason)>0 THEN
+      RAISE EXCEPTION 'Read capture requires its finished original and closed native observation result' USING ERRCODE='23514';
+    END IF;
+    RETURN;
+  END IF;
+  IF candidate.finished_at IS NULL OR candidate.finished_at>candidate.recorded_at
+    OR candidate.result IS NULL OR candidate.result NOT IN ('acknowledged','known_not_applied','uncertain')
+    OR candidate.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired'
+    OR num_nonnulls(candidate.terminal_outcome,candidate.semantic_fingerprint,candidate.fingerprint_version,
+      candidate.observation_revision_id,candidate.comparison_version,candidate.observation_surface,
+      candidate.observation_completeness,candidate.output_kind,candidate.output_revision_id,
+      candidate.output_review_analysis_id,candidate.output_agent_run_id,candidate.no_work_reason)>0 THEN
+    RAISE EXCEPTION 'Write capture requires closed original write result fields and original completion time' USING ERRCODE='23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION composition.check_execution_attempt_owner(candidate actions.execution_attempt) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE provider_kind composition.provider; contract_id text; original_kind text;
+BEGIN
+  SELECT c.provider,c.id INTO provider_kind,contract_id FROM actions.execution_step s JOIN composition.operation_contract c ON c.id=s.operation_contract_id
+    WHERE s.organization_id=candidate.organization_id AND s.execution_id=candidate.execution_id AND s.id=candidate.step_id;
+  IF NOT FOUND OR provider_kind='internal' THEN
+    RAISE EXCEPTION 'Execution attempt owner is not installed for this shape' USING ERRCODE='23514';
+  END IF;
+  IF candidate.retry_command_id IS NOT NULL AND contract_id<>'asc.review_response_upsert@1' THEN RAISE EXCEPTION 'Retry capture owner is not installed for this operation' USING ERRCODE='23514'; END IF;
+  IF candidate.input_attempt_id IS NOT NULL OR (candidate.prewrite_attempt_id IS NOT NULL AND contract_id<>'asc.review_response_upsert@1') THEN
+    RAISE EXCEPTION 'Execution input evidence owner is not installed' USING ERRCODE='23514';
+  END IF;
+  IF contract_id='asc.review_response_upsert@1' THEN
+    original_kind:=candidate.kind::text;
+    IF candidate.kind IN ('late_evidence','conflicting_completion') THEN
+      SELECT a.kind::text INTO original_kind FROM actions.execution_attempt a WHERE a.organization_id=candidate.organization_id AND a.execution_id=candidate.execution_id AND a.step_id=candidate.step_id AND a.id=candidate.subject_attempt_id;
+    END IF;
+    IF candidate.kind='conflicting_completion' AND candidate.capture_digest_version IS DISTINCT FROM
+      (CASE WHEN candidate.retry_command_id IS NOT NULL THEN 4 WHEN candidate.local_denial_reason IS NOT NULL THEN 3
+        WHEN original_kind='readback' AND candidate.resource_guard_generation IS NOT NULL THEN 2
+        WHEN original_kind='write' AND candidate.prewrite_attempt_id IS NOT NULL THEN 2 ELSE 1 END) THEN
+      RAISE EXCEPTION 'ASC capture codec differs from its retained original kind and admission' USING ERRCODE='23514';
+    END IF;
+    IF original_kind='inspection' THEN PERFORM app_store_connect.check_review_prewrite_receipt(candidate);
+    ELSIF original_kind='readback' THEN PERFORM app_store_connect.check_review_readback_receipt(candidate);
+    ELSE PERFORM app_store_connect.check_review_write_receipt(candidate); END IF;
+    RETURN;
+  END IF;
+  IF candidate.local_denial_reason IS NOT NULL THEN RAISE EXCEPTION 'Local denial owner is not installed for this operation' USING ERRCODE='23514'; END IF;
+  IF candidate.capture_digest_version IS NOT NULL THEN RAISE EXCEPTION 'Capture codec owner is not installed for this operation' USING ERRCODE='23514'; END IF;
+  IF candidate.kind<>'write' THEN RAISE EXCEPTION 'Captured evidence owner is not installed for this operation' USING ERRCODE='23514'; END IF;
+  IF EXISTS(SELECT 1 FROM app_store_connect.attempt_receipt r WHERE r.organization_id=candidate.organization_id AND r.attempt_id=candidate.id) THEN
+    RAISE EXCEPTION 'ASC receipt cannot finalize another operation' USING ERRCODE='23514';
+  END IF;
+  IF candidate.finished_at IS NOT NULL AND NOT (
+    (candidate.result='known_not_applied' AND candidate.non_application_basis='pre_dispatch_failure')
+    OR (candidate.result='uncertain' AND candidate.uncertainty_reason IN ('transport_lost','claim_expired'))
+  ) THEN
+    RAISE EXCEPTION 'Provider completion evidence owner is not installed' USING ERRCODE='23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION app_store_connect.guard_review_retry_admission() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE s actions.execution_step; r actions.command; prior actions.execution_attempt; inspection actions.execution_attempt;
+BEGIN
+ IF NEW.kind NOT IN ('write','inspection') THEN RETURN NEW; END IF;
+ SELECT * INTO s FROM actions.execution_step WHERE organization_id=NEW.organization_id AND execution_id=NEW.execution_id AND id=NEW.step_id;
+ IF s.operation_contract_id IS DISTINCT FROM 'asc.review_response_upsert@1' THEN RETURN NEW; END IF;
+ IF NEW.retry_command_id IS NULL THEN
+   IF EXISTS(SELECT 1 FROM actions.execution_attempt w WHERE w.organization_id=NEW.organization_id AND w.execution_id=NEW.execution_id AND w.kind='write') THEN
+     RAISE EXCEPTION 'A subsequent ASC effect inspection or write requires its exact unused Retry' USING ERRCODE='23514';
+   END IF;
+   RETURN NEW;
+ END IF;
+ SELECT * INTO r FROM actions.command WHERE organization_id=NEW.organization_id AND id=NEW.retry_command_id AND progress_execution_id=NEW.execution_id AND progress_step_id=NEW.step_id;
+ SELECT * INTO prior FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND execution_id=NEW.execution_id AND step_id=NEW.step_id AND id=r.progress_subject_attempt_id;
+ IF r.id IS NULL OR r.kind IS DISTINCT FROM 'retry' OR r.outcome IS DISTINCT FROM 'accepted' OR r.progress_cycle_command_id IS NULL
+   OR prior.id IS NULL OR prior.kind IS DISTINCT FROM 'write' OR prior.finished_at IS NULL OR prior.number>=NEW.number
+   OR r.accepted_at>NEW.started_at OR prior.finished_at>r.accepted_at
+   OR EXISTS(SELECT 1 FROM actions.execution_attempt w WHERE w.organization_id=NEW.organization_id AND w.retry_command_id=r.id AND w.kind='write')
+   OR EXISTS(SELECT 1 FROM actions.execution_attempt w WHERE w.organization_id=NEW.organization_id AND w.execution_id=NEW.execution_id AND w.kind='write' AND w.number>prior.number)
+ THEN RAISE EXCEPTION 'ASC Retry admission requires its exact prior original and single unconsumed permission' USING ERRCODE='23514'; END IF;
+ IF NEW.kind='inspection' THEN
+   IF NEW.inspection_purpose IS DISTINCT FROM 'prewrite' OR NOT actions.cycle_descends_from(NEW.organization_id,NEW.execution_id,NEW.step_id,NEW.cycle_command_id,r.progress_cycle_command_id) THEN
+     RAISE EXCEPTION 'Retry inspection must use its exact renewed prewrite lineage' USING ERRCODE='23514'; END IF;
+ ELSE
+   SELECT * INTO inspection FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND execution_id=NEW.execution_id AND step_id=NEW.step_id AND id=NEW.prewrite_attempt_id;
+   IF inspection.retry_command_id IS DISTINCT FROM r.id THEN RAISE EXCEPTION 'Retry write must consume its own authorized inspection' USING ERRCODE='23514'; END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER review_retry_admission BEFORE INSERT ON actions.execution_attempt FOR EACH ROW EXECUTE FUNCTION app_store_connect.guard_review_retry_admission();
+
+--> statement-breakpoint
+DO $retry_maintenance$
+BEGIN
+  PERFORM set_config('lock_timeout',current_setting('fload.retry_previous_lock_timeout'),true);
+  PERFORM set_config('statement_timeout',current_setting('fload.retry_previous_statement_timeout'),true);
+END $retry_maintenance$;
