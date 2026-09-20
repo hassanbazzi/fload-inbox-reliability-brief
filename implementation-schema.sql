@@ -4042,3 +4042,125 @@ BEGIN
   ELSE RAISE EXCEPTION 'Receipt is not admitted by the ASC upsert operation' USING ERRCODE='23514';
   END IF;
 END $$;
+
+-- 0165_common_mad_thinker.sql
+-- Generated ordered index definitions:
+-- CREATE INDEX "agent_activity_agent_page_idx" ON "agent_activity" USING btree ("organizationId","agentId","createdAt" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- CREATE INDEX "agent_activity_agent_level_page_idx" ON "agent_activity" USING btree ("organizationId","agentId","level","createdAt" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- CREATE INDEX "agent_run_page_idx" ON "agent_run" USING btree ("organizationId","agentId","createdAt" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- CREATE INDEX "agent_chat_page_idx" ON "chat_message" USING btree ("conversationId","createdAt" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- Populated heaps require concurrent preparation before this transaction.
+-- See docs/agent-history-pagination.md.
+DO $agent_history_indexes$
+DECLARE
+  item record;
+  index_id oid;
+  previous_lock_timeout text := current_setting('lock_timeout');
+BEGIN
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('fload:agent-history-indexes',0)) THEN
+    RAISE EXCEPTION 'Agent history index preparation or migration is already running';
+  END IF;
+  PERFORM set_config('lock_timeout','5s',true);
+  -- Fixed order and bounded waits; prepared validation allows normal DML.
+  LOCK TABLE public.agent_activity, public.agent_run, public.chat_message IN SHARE UPDATE EXCLUSIVE MODE;
+  FOR item IN SELECT * FROM (VALUES
+    ('agent_activity_agent_page_idx','agent_activity',4,
+     'CREATE INDEX agent_activity_agent_page_idx ON public.agent_activity USING btree ("organizationId", "agentId", "createdAt" DESC, id COLLATE "C" DESC)'),
+    ('agent_activity_agent_level_page_idx','agent_activity',5,
+     'CREATE INDEX agent_activity_agent_level_page_idx ON public.agent_activity USING btree ("organizationId", "agentId", level, "createdAt" DESC, id COLLATE "C" DESC)'),
+    ('agent_run_page_idx','agent_run',4,
+     'CREATE INDEX agent_run_page_idx ON public.agent_run USING btree ("organizationId", "agentId", "createdAt" DESC, id COLLATE "C" DESC)'),
+    ('agent_chat_page_idx','chat_message',3,
+     'CREATE INDEX agent_chat_page_idx ON public.chat_message USING btree ("conversationId", "createdAt" DESC, id COLLATE "C" DESC)')
+  ) AS required(name,table_name,key_count,definition)
+  LOOP
+    index_id := to_regclass('public.' || item.name);
+    IF index_id IS NULL THEN
+      EXECUTE format('LOCK TABLE public.%I IN SHARE MODE',item.table_name);
+      -- Do not scan rows or trust estimates; only untouched empty heaps build
+      -- while holding this transactional write-excluding lock.
+      IF pg_relation_size(to_regclass('public.' || item.table_name)) <> 0 THEN
+        RAISE EXCEPTION 'Prepare public.% before migration: run packages/database/scripts/prepare-agent-history-indexes.ts --database-name NAME --execute with the explicitly selected DATABASE_URL',item.name;
+      END IF;
+      EXECUTE item.definition;
+      index_id := to_regclass('public.' || item.name);
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+      WHERE i.indexrelid=index_id AND i.indrelid=to_regclass('public.' || item.table_name) AND c.relkind='i'
+        AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate
+        AND NOT i.indisprimary AND NOT i.indisexclusion AND NOT i.indnullsnotdistinct
+        AND i.indnkeyatts=item.key_count AND i.indnatts=item.key_count
+        AND i.indpred IS NULL AND i.indexprs IS NULL
+        AND pg_get_indexdef(i.indexrelid,0,false)=item.definition
+        AND NOT EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conindid=i.indexrelid)
+    ) THEN
+      RAISE EXCEPTION 'public.% has a mismatched definition, constraint owner, or invalid build state; operator inspection is required',item.name;
+    END IF;
+  END LOOP;
+  PERFORM set_config('lock_timeout',previous_lock_timeout,true);
+END;
+$agent_history_indexes$;
+
+-- 0166_eager_nebula.sql
+-- Prepared concurrently on populated execution history; fresh untouched heaps may build transactionally.
+-- Run scripts/prepare-retained-evidence-indexes.ts with an explicitly selected database first.
+DO $retained_evidence_indexes$
+DECLARE
+  item record;
+  index_id oid;
+  previous_lock_timeout text := current_setting('lock_timeout');
+BEGIN
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('fload:retained-evidence-indexes',0)) THEN
+    RAISE EXCEPTION 'Retained evidence index preparation or migration is already running';
+  END IF;
+  PERFORM set_config('lock_timeout','5s',true);
+  -- Fixed order and bounded waits; prepared validation allows normal DML.
+  LOCK TABLE actions.execution_attempt IN SHARE UPDATE EXCLUSIVE MODE;
+  FOR item IN SELECT * FROM (VALUES
+    ('attempt_subject_order','execution_attempt',5,
+     'CREATE INDEX attempt_subject_order ON actions.execution_attempt USING btree (organization_id, subject_attempt_id, kind, resource_guard_generation, number DESC)'),
+    ('attempt_comparable_evidence','execution_attempt',6,
+     'CREATE INDEX attempt_comparable_evidence ON actions.execution_attempt USING btree (organization_id, execution_id, step_id, kind, subject_attempt_id, number DESC) WHERE ((kind = ANY (ARRAY[''readback''::actions.attempt_kind, ''late_evidence''::actions.attempt_kind])) AND (result = ANY (ARRAY[''matched''::actions.attempt_result, ''mismatch''::actions.attempt_result])))')
+  ) AS required(name,table_name,key_count,definition)
+  LOOP
+    index_id := to_regclass('actions.' || item.name);
+    IF index_id IS NULL THEN
+      EXECUTE format('LOCK TABLE actions.%I IN SHARE MODE',item.table_name);
+      -- Do not scan rows or trust estimates; only untouched empty heaps build
+      -- while holding this transactional write-excluding lock.
+      IF pg_relation_size(to_regclass('actions.' || item.table_name)) <> 0 THEN
+        RAISE EXCEPTION 'Prepare actions.% before migration: run packages/database/scripts/prepare-retained-evidence-indexes.ts --database-name NAME --execute with the explicitly selected DATABASE_URL',item.name;
+      END IF;
+      EXECUTE item.definition;
+      index_id := to_regclass('actions.' || item.name);
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+      WHERE i.indexrelid=index_id AND i.indrelid=to_regclass('actions.' || item.table_name) AND c.relkind='i'
+        AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate
+        AND NOT i.indisprimary AND NOT i.indisexclusion AND NOT i.indnullsnotdistinct
+        AND i.indnkeyatts=item.key_count AND i.indnatts=item.key_count
+        AND i.indexprs IS NULL
+        AND pg_get_indexdef(i.indexrelid,0,false)=item.definition
+        AND NOT EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conindid=i.indexrelid)
+    ) THEN
+      RAISE EXCEPTION 'actions.% has a mismatched definition, constraint owner, or invalid build state; operator inspection is required',item.name;
+    END IF;
+  END LOOP;
+  -- The validated ordered replacement keeps the entire former lookup prefix.
+  -- Drop only this exact redundant ordinary index, never an unexpected object.
+  index_id := to_regclass('actions.attempt_subject_evidence');
+  IF index_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_index i WHERE i.indexrelid=index_id
+        AND i.indrelid='actions.execution_attempt'::regclass
+        AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive
+        AND pg_get_indexdef(i.indexrelid,0,false)='CREATE INDEX attempt_subject_evidence ON actions.execution_attempt USING btree (organization_id, subject_attempt_id, kind)'
+        AND NOT EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conindid=i.indexrelid)
+    ) THEN RAISE EXCEPTION 'actions.attempt_subject_evidence is not the exact redundant predecessor; operator inspection is required'; END IF;
+    DROP INDEX actions.attempt_subject_evidence;
+  END IF;
+  PERFORM set_config('lock_timeout',previous_lock_timeout,true);
+END;
+$retained_evidence_indexes$;
