@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0168: 19 relations, 286 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0156: 21 relations, 341 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -595,6 +595,236 @@ attention_proposal_only: "agent_work"."attention_advisory"."purpose" = 'proposal
 attention_failure_count: "agent_work"."attention_advisory"."consecutive_failures" >= 0
 ```
 
+## `listing_work.listing_content`
+
+Fload-owned listing content: store/locale, intent, exact title/description/support URL and explicit field states, plus capture instants. No native resource IDs.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → actions.revision.organization_id |
+| `revision_id` | text | No | PK; FK → actions.revision.id |
+| `purpose` | revision_purpose: proposal, baseline, observation, historical | No | FK → actions.revision.purpose |
+| `store` | store: ios, android | No | — |
+| `locale` | text | No | — |
+| `intent` | intent: create, update, repair, restore | Yes | — |
+| `title_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `title` | text | Yes | — |
+| `description_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `description` | text | Yes | — |
+| `support_url_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `support_url` | text | Yes | — |
+| `operator_instructions` | text | Yes | — |
+| `keyword_analysis` | text | Yes | — |
+| `source_fingerprint` | text | Yes | — |
+| `captured_at` | timestamp with time zone | Yes | — |
+| `source_capture_at` | timestamp with time zone | Yes | — |
+
+```sql
+listing_content_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
+listing_content_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
+listing_content_purpose: "listing_work"."listing_content"."purpose" IN ('proposal','baseline','observation')
+listing_content_locale: (
+    ("listing_work"."listing_content"."store" = 'ios' AND "listing_work"."listing_content"."locale" IN ('ar-SA', 'bn-BD', 'ca', 'zh-Hans', 'zh-Hant', 'hr', 'cs', 'da', 'nl-NL', 'en-AU', 'en-CA', 'en-GB', 'en-US', 'fi', 'fr-FR', 'fr-CA', 'de-DE', 'el', 'gu-IN', 'he', 'hi', 'hu', 'id', 'it', 'ja', 'kn-IN', 'ko', 'ms', 'ml-IN', 'mr-IN', 'no', 'or-IN', 'pl', 'pt-BR', 'pt-PT', 'pa-IN', 'ro', 'ru', 'sk', 'sl-SI', 'es-MX', 'es-ES', 'sv', 'ta-IN', 'te-IN', 'th', 'tr', 'uk', 'ur-PK', 'vi'))
+    OR ("listing_work"."listing_content"."store" = 'android' AND "listing_work"."listing_content"."locale" IN ('af', 'am', 'ar', 'az-AZ', 'be', 'bg', 'bn-BD', 'ca', 'cs-CZ', 'da-DK', 'de-DE', 'el-GR', 'en-AU', 'en-CA', 'en-GB', 'en-IN', 'en-SG', 'en-US', 'en-ZA', 'es-419', 'es-ES', 'es-US', 'et', 'eu-ES', 'fa', 'fi-FI', 'fil', 'fr-CA', 'fr-FR', 'gl-ES', 'gu', 'hi-IN', 'hr', 'hu-HU', 'hy-AM', 'id', 'is-IS', 'it-IT', 'iw-IL', 'ja-JP', 'ka-GE', 'kk', 'km-KH', 'kn-IN', 'ko-KR', 'ky-KG', 'lo-LA', 'lt', 'lv', 'mk-MK', 'ml-IN', 'mn-MN', 'mr-IN', 'ms', 'ms-MY', 'my-MM', 'nb-NO', 'ne-NP', 'nl-NL', 'no-NO', 'pa', 'pl-PL', 'pt-BR', 'pt-PT', 'ro', 'ru-RU', 'si-LK', 'sk', 'sl', 'sq', 'sr', 'sv-SE', 'sw', 'ta-IN', 'te-IN', 'th', 'tr-TR', 'uk', 'ur', 'vi', 'zh-CN', 'zh-HK', 'zh-TW', 'zu'))
+  ) IS TRUE
+listing_content_purpose_shape: (CASE WHEN "listing_work"."listing_content"."purpose" = 'proposal'
+    THEN "listing_work"."listing_content"."intent" IS NOT NULL AND "listing_work"."listing_content"."captured_at" IS NULL AND "listing_work"."listing_content"."source_capture_at" IS NULL
+    ELSE "listing_work"."listing_content"."intent" IS NULL AND "listing_work"."listing_content"."operator_instructions" IS NULL AND "listing_work"."listing_content"."keyword_analysis" IS NULL
+      AND "listing_work"."listing_content"."source_fingerprint" IS NULL AND "listing_work"."listing_content"."captured_at" IS NOT NULL
+    END) IS TRUE
+listing_content_fingerprint: "listing_work"."listing_content"."source_fingerprint" IS NULL OR length("listing_work"."listing_content"."source_fingerprint") > 0
+listing_title_shape: (CASE "listing_work"."listing_content"."title_state"
+    WHEN 'unspecified' THEN "listing_work"."listing_content"."title" IS NULL
+    WHEN 'present' THEN "listing_work"."listing_content"."title" IS NOT NULL AND length("listing_work"."listing_content"."title") > 0
+    WHEN 'empty' THEN "listing_work"."listing_content"."title" IS NOT NULL AND "listing_work"."listing_content"."title" = ''
+    WHEN 'dismissed' THEN "listing_work"."listing_content"."purpose" = 'proposal' AND "listing_work"."listing_content"."title" IS NOT NULL
+    WHEN 'unreadable' THEN "listing_work"."listing_content"."purpose" IN ('baseline','observation') AND "listing_work"."listing_content"."title" IS NULL
+    ELSE false END) IS TRUE
+listing_description_shape: (CASE "listing_work"."listing_content"."description_state"
+    WHEN 'unspecified' THEN "listing_work"."listing_content"."description" IS NULL
+    WHEN 'present' THEN "listing_work"."listing_content"."description" IS NOT NULL AND length("listing_work"."listing_content"."description") > 0
+    WHEN 'empty' THEN "listing_work"."listing_content"."description" IS NOT NULL AND "listing_work"."listing_content"."description" = ''
+    WHEN 'dismissed' THEN "listing_work"."listing_content"."purpose" = 'proposal' AND "listing_work"."listing_content"."description" IS NOT NULL
+    WHEN 'unreadable' THEN "listing_work"."listing_content"."purpose" IN ('baseline','observation') AND "listing_work"."listing_content"."description" IS NULL
+    ELSE false END) IS TRUE
+listing_support_url_shape: (CASE "listing_work"."listing_content"."support_url_state"
+    WHEN 'unspecified' THEN "listing_work"."listing_content"."support_url" IS NULL
+    WHEN 'present' THEN "listing_work"."listing_content"."support_url" IS NOT NULL AND length("listing_work"."listing_content"."support_url") > 0
+    WHEN 'empty' THEN "listing_work"."listing_content"."support_url" IS NOT NULL AND "listing_work"."listing_content"."support_url" = ''
+    WHEN 'dismissed' THEN "listing_work"."listing_content"."purpose" = 'proposal' AND "listing_work"."listing_content"."support_url" IS NOT NULL
+    WHEN 'unreadable' THEN "listing_work"."listing_content"."purpose" IN ('baseline','observation') AND "listing_work"."listing_content"."support_url" IS NULL
+    ELSE false END) IS TRUE
+listing_content_instant_range: ("listing_work"."listing_content"."captured_at" IS NULL OR "listing_work"."listing_content"."captured_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("listing_work"."listing_content"."source_capture_at" IS NULL OR "listing_work"."listing_content"."source_capture_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+```
+
+## `app_store_connect.listing_content`
+
+Apple-owned source/signer, app and named native resources, native states and Apple-only copy. Joins its domain row by organization and revision; locale is stored once.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → actions.revision.organization_id; FK → listing_work.listing_content.organization_id |
+| `revision_id` | text | No | PK; FK → actions.revision.id; FK → listing_work.listing_content.revision_id |
+| `purpose` | revision_purpose: proposal, baseline, observation, historical | No | FK → actions.revision.purpose |
+| `source_asset_data_source_id` | text | No | — |
+| `source_connector_id` | text | No | — |
+| `credential_kind` | credential_kind: individual, team | No | — |
+| `credential_key_id` | text | No | — |
+| `credential_team_issuer_id` | text | Yes | — |
+| `provider_app_id` | text | No | — |
+| `release_selection` | listing_release_selection: exact_release, next_editable_release | Yes | — |
+| `app_info_operation` | listing_resource_operation: omit, create, update | Yes | — |
+| `app_info_availability` | listing_resource_availability: unspecified, present, absent, unreadable | Yes | — |
+| `app_info_id` | text | Yes | — |
+| `app_info_localization_id` | text | Yes | — |
+| `app_info_native_state_kind` | listing_native_state_kind: known, unreadable, not_observed | Yes | — |
+| `app_info_native_state` | listing_native_state: PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, REJECTED, METADATA_REJECTED, WAITING_FOR_REVIEW, READY_FOR_SALE, READY_FOR_DISTRIBUTION | Yes | — |
+| `version_operation` | listing_resource_operation: omit, create, update | Yes | — |
+| `version_availability` | listing_resource_availability: unspecified, present, absent, unreadable | Yes | — |
+| `app_version_id` | text | Yes | — |
+| `app_version_localization_id` | text | Yes | — |
+| `version_native_state_kind` | listing_native_state_kind: known, unreadable, not_observed | Yes | — |
+| `version_native_state` | listing_native_state: PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, REJECTED, METADATA_REJECTED, WAITING_FOR_REVIEW, READY_FOR_SALE, READY_FOR_DISTRIBUTION | Yes | — |
+| `live_promotional_operation` | listing_resource_operation: omit, create, update | Yes | — |
+| `live_promotional_availability` | listing_resource_availability: unspecified, present, absent, unreadable | Yes | — |
+| `live_promotional_version_id` | text | Yes | — |
+| `live_promotional_localization_id` | text | Yes | — |
+| `live_promotional_native_state_kind` | listing_native_state_kind: known, unreadable, not_observed | Yes | — |
+| `live_promotional_native_state` | listing_native_state: PREPARE_FOR_SUBMISSION, DEVELOPER_REJECTED, REJECTED, METADATA_REJECTED, WAITING_FOR_REVIEW, READY_FOR_SALE, READY_FOR_DISTRIBUTION | Yes | — |
+| `subtitle_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `subtitle` | text | Yes | — |
+| `keywords_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `keywords` | text | Yes | — |
+| `promotional_text_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `promotional_text` | text | Yes | — |
+| `whats_new_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `whats_new` | text | Yes | — |
+| `live_promotional_text_state` | field_state: unspecified, present, empty, dismissed, unreadable | No | — |
+| `live_promotional_text` | text | Yes | — |
+
+```sql
+listing_content_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
+asc_listing_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
+asc_listing_domain_scope: (organization_id, revision_id) → listing_work.listing_content (organization_id, revision_id)
+asc_listing_purpose: "app_store_connect"."listing_content"."purpose" IN ('proposal','baseline','observation')
+asc_listing_identity: length("app_store_connect"."listing_content"."source_asset_data_source_id") > 0 AND length("app_store_connect"."listing_content"."source_connector_id") > 0 AND length("app_store_connect"."listing_content"."credential_key_id") > 0 AND length("app_store_connect"."listing_content"."provider_app_id") > 0 AND ("app_store_connect"."listing_content"."app_info_id" IS NULL OR length("app_store_connect"."listing_content"."app_info_id") > 0) AND ("app_store_connect"."listing_content"."app_info_localization_id" IS NULL OR length("app_store_connect"."listing_content"."app_info_localization_id") > 0) AND ("app_store_connect"."listing_content"."app_version_id" IS NULL OR length("app_store_connect"."listing_content"."app_version_id") > 0) AND ("app_store_connect"."listing_content"."app_version_localization_id" IS NULL OR length("app_store_connect"."listing_content"."app_version_localization_id") > 0) AND ("app_store_connect"."listing_content"."live_promotional_version_id" IS NULL OR length("app_store_connect"."listing_content"."live_promotional_version_id") > 0) AND ("app_store_connect"."listing_content"."live_promotional_localization_id" IS NULL OR length("app_store_connect"."listing_content"."live_promotional_localization_id") > 0)
+asc_listing_credential_shape: ("app_store_connect"."listing_content"."credential_kind" = 'individual' AND "app_store_connect"."listing_content"."credential_team_issuer_id" IS NULL) OR ("app_store_connect"."listing_content"."credential_kind" = 'team' AND "app_store_connect"."listing_content"."credential_team_issuer_id" IS NOT NULL AND length("app_store_connect"."listing_content"."credential_team_issuer_id") > 0)
+asc_listing_release_shape: ("app_store_connect"."listing_content"."purpose" = 'proposal') = ("app_store_connect"."listing_content"."release_selection" IS NOT NULL)
+asc_listing_app_info_shape: (CASE WHEN "app_store_connect"."listing_content"."purpose" = 'proposal' THEN
+    "app_store_connect"."listing_content"."app_info_availability" IS NULL AND "app_store_connect"."listing_content"."app_info_native_state_kind" IS NULL AND "app_store_connect"."listing_content"."app_info_native_state" IS NULL AND
+    CASE "app_store_connect"."listing_content"."release_selection"
+      WHEN 'next_editable_release' THEN "app_store_connect"."listing_content"."app_info_operation" IS NULL AND "app_store_connect"."listing_content"."app_info_id" IS NULL AND "app_store_connect"."listing_content"."app_info_localization_id" IS NULL
+      WHEN 'exact_release' THEN CASE "app_store_connect"."listing_content"."app_info_operation"
+        WHEN 'omit' THEN "app_store_connect"."listing_content"."app_info_id" IS NULL AND "app_store_connect"."listing_content"."app_info_localization_id" IS NULL
+        WHEN 'create' THEN true AND "app_store_connect"."listing_content"."app_info_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_info_localization_id" IS NULL
+        WHEN 'update' THEN "app_store_connect"."listing_content"."app_info_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_info_localization_id" IS NOT NULL
+        ELSE false END
+      ELSE false END
+    ELSE "app_store_connect"."listing_content"."app_info_operation" IS NULL AND CASE "app_store_connect"."listing_content"."app_info_availability"
+      WHEN 'unspecified' THEN num_nonnulls("app_store_connect"."listing_content"."app_info_id","app_store_connect"."listing_content"."app_info_localization_id","app_store_connect"."listing_content"."app_info_native_state_kind","app_store_connect"."listing_content"."app_info_native_state") = 0
+      WHEN 'present' THEN "app_store_connect"."listing_content"."app_info_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_info_localization_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_info_native_state_kind" IS NOT NULL
+      WHEN 'absent' THEN "app_store_connect"."listing_content"."app_info_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_info_localization_id" IS NULL AND "app_store_connect"."listing_content"."app_info_native_state_kind" IS NOT NULL
+      WHEN 'unreadable' THEN "app_store_connect"."listing_content"."app_info_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_info_native_state_kind" IS NOT NULL
+      ELSE false END
+    END) IS TRUE
+asc_listing_version_shape: (CASE WHEN "app_store_connect"."listing_content"."purpose" = 'proposal' THEN
+    "app_store_connect"."listing_content"."version_availability" IS NULL AND "app_store_connect"."listing_content"."version_native_state_kind" IS NULL AND "app_store_connect"."listing_content"."version_native_state" IS NULL AND
+    CASE "app_store_connect"."listing_content"."release_selection"
+      WHEN 'next_editable_release' THEN "app_store_connect"."listing_content"."version_operation" IS NULL AND "app_store_connect"."listing_content"."app_version_id" IS NULL AND "app_store_connect"."listing_content"."app_version_localization_id" IS NULL
+      WHEN 'exact_release' THEN CASE "app_store_connect"."listing_content"."version_operation"
+        WHEN 'omit' THEN "app_store_connect"."listing_content"."app_version_id" IS NULL AND "app_store_connect"."listing_content"."app_version_localization_id" IS NULL
+        WHEN 'create' THEN true AND "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_localization_id" IS NULL
+        WHEN 'update' THEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_localization_id" IS NOT NULL
+        ELSE false END
+      ELSE false END
+    ELSE "app_store_connect"."listing_content"."version_operation" IS NULL AND CASE "app_store_connect"."listing_content"."version_availability"
+      WHEN 'unspecified' THEN num_nonnulls("app_store_connect"."listing_content"."app_version_id","app_store_connect"."listing_content"."app_version_localization_id","app_store_connect"."listing_content"."version_native_state_kind","app_store_connect"."listing_content"."version_native_state") = 0
+      WHEN 'present' THEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_localization_id" IS NOT NULL AND "app_store_connect"."listing_content"."version_native_state_kind" IS NOT NULL
+      WHEN 'absent' THEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_localization_id" IS NULL AND "app_store_connect"."listing_content"."version_native_state_kind" IS NOT NULL
+      WHEN 'unreadable' THEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."version_native_state_kind" IS NOT NULL
+      ELSE false END
+    END) IS TRUE
+asc_listing_live_promo_shape: (CASE WHEN "app_store_connect"."listing_content"."purpose" = 'proposal' THEN
+    "app_store_connect"."listing_content"."live_promotional_availability" IS NULL AND "app_store_connect"."listing_content"."live_promotional_native_state_kind" IS NULL AND "app_store_connect"."listing_content"."live_promotional_native_state" IS NULL AND
+    CASE "app_store_connect"."listing_content"."release_selection"
+      WHEN 'next_editable_release' THEN "app_store_connect"."listing_content"."live_promotional_operation" IS NULL AND "app_store_connect"."listing_content"."live_promotional_version_id" IS NULL AND "app_store_connect"."listing_content"."live_promotional_localization_id" IS NULL
+      WHEN 'exact_release' THEN CASE "app_store_connect"."listing_content"."live_promotional_operation"
+        WHEN 'omit' THEN "app_store_connect"."listing_content"."live_promotional_version_id" IS NULL AND "app_store_connect"."listing_content"."live_promotional_localization_id" IS NULL
+        WHEN 'create' THEN false AND "app_store_connect"."listing_content"."live_promotional_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_localization_id" IS NULL
+        WHEN 'update' THEN "app_store_connect"."listing_content"."live_promotional_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_localization_id" IS NOT NULL
+        ELSE false END
+      ELSE false END
+    ELSE "app_store_connect"."listing_content"."live_promotional_operation" IS NULL AND CASE "app_store_connect"."listing_content"."live_promotional_availability"
+      WHEN 'unspecified' THEN num_nonnulls("app_store_connect"."listing_content"."live_promotional_version_id","app_store_connect"."listing_content"."live_promotional_localization_id","app_store_connect"."listing_content"."live_promotional_native_state_kind","app_store_connect"."listing_content"."live_promotional_native_state") = 0
+      WHEN 'present' THEN "app_store_connect"."listing_content"."live_promotional_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_localization_id" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_native_state_kind" IS NOT NULL
+      WHEN 'absent' THEN "app_store_connect"."listing_content"."live_promotional_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_localization_id" IS NULL AND "app_store_connect"."listing_content"."live_promotional_native_state_kind" IS NOT NULL
+      WHEN 'unreadable' THEN "app_store_connect"."listing_content"."live_promotional_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_native_state_kind" IS NOT NULL
+      ELSE false END
+    END) IS TRUE
+asc_listing_app_info_state: (CASE
+    WHEN "app_store_connect"."listing_content"."app_info_native_state_kind" = 'known' THEN "app_store_connect"."listing_content"."app_info_native_state" IS NOT NULL
+    ELSE "app_store_connect"."listing_content"."app_info_native_state" IS NULL END) IS TRUE
+asc_listing_version_state: (CASE
+    WHEN "app_store_connect"."listing_content"."version_native_state_kind" = 'known' THEN "app_store_connect"."listing_content"."version_native_state" IS NOT NULL
+    ELSE "app_store_connect"."listing_content"."version_native_state" IS NULL END) IS TRUE
+asc_listing_live_promo_state: (CASE
+    WHEN "app_store_connect"."listing_content"."live_promotional_native_state_kind" = 'known' THEN "app_store_connect"."listing_content"."live_promotional_native_state" IS NOT NULL
+    ELSE "app_store_connect"."listing_content"."live_promotional_native_state" IS NULL END) IS TRUE
+asc_listing_subtitle_shape: (CASE "app_store_connect"."listing_content"."subtitle_state"
+    WHEN 'unspecified' THEN "app_store_connect"."listing_content"."subtitle" IS NULL
+    WHEN 'present' THEN "app_store_connect"."listing_content"."subtitle" IS NOT NULL AND length("app_store_connect"."listing_content"."subtitle") > 0
+    WHEN 'empty' THEN "app_store_connect"."listing_content"."subtitle" IS NOT NULL AND "app_store_connect"."listing_content"."subtitle" = ''
+    WHEN 'dismissed' THEN "app_store_connect"."listing_content"."purpose" = 'proposal' AND "app_store_connect"."listing_content"."subtitle" IS NOT NULL
+    WHEN 'unreadable' THEN "app_store_connect"."listing_content"."purpose" IN ('baseline','observation') AND "app_store_connect"."listing_content"."subtitle" IS NULL
+    ELSE false END) IS TRUE
+asc_listing_keywords_shape: (CASE "app_store_connect"."listing_content"."keywords_state"
+    WHEN 'unspecified' THEN "app_store_connect"."listing_content"."keywords" IS NULL
+    WHEN 'present' THEN "app_store_connect"."listing_content"."keywords" IS NOT NULL AND length("app_store_connect"."listing_content"."keywords") > 0
+    WHEN 'empty' THEN "app_store_connect"."listing_content"."keywords" IS NOT NULL AND "app_store_connect"."listing_content"."keywords" = ''
+    WHEN 'dismissed' THEN "app_store_connect"."listing_content"."purpose" = 'proposal' AND "app_store_connect"."listing_content"."keywords" IS NOT NULL
+    WHEN 'unreadable' THEN "app_store_connect"."listing_content"."purpose" IN ('baseline','observation') AND "app_store_connect"."listing_content"."keywords" IS NULL
+    ELSE false END) IS TRUE
+asc_listing_promo_text_shape: (CASE "app_store_connect"."listing_content"."promotional_text_state"
+    WHEN 'unspecified' THEN "app_store_connect"."listing_content"."promotional_text" IS NULL
+    WHEN 'present' THEN "app_store_connect"."listing_content"."promotional_text" IS NOT NULL AND length("app_store_connect"."listing_content"."promotional_text") > 0
+    WHEN 'empty' THEN "app_store_connect"."listing_content"."promotional_text" IS NOT NULL AND "app_store_connect"."listing_content"."promotional_text" = ''
+    WHEN 'dismissed' THEN "app_store_connect"."listing_content"."purpose" = 'proposal' AND "app_store_connect"."listing_content"."promotional_text" IS NOT NULL
+    WHEN 'unreadable' THEN "app_store_connect"."listing_content"."purpose" IN ('baseline','observation') AND "app_store_connect"."listing_content"."promotional_text" IS NULL
+    ELSE false END) IS TRUE
+asc_listing_whats_new_shape: (CASE "app_store_connect"."listing_content"."whats_new_state"
+    WHEN 'unspecified' THEN "app_store_connect"."listing_content"."whats_new" IS NULL
+    WHEN 'present' THEN "app_store_connect"."listing_content"."whats_new" IS NOT NULL AND length("app_store_connect"."listing_content"."whats_new") > 0
+    WHEN 'empty' THEN "app_store_connect"."listing_content"."whats_new" IS NOT NULL AND "app_store_connect"."listing_content"."whats_new" = ''
+    WHEN 'dismissed' THEN "app_store_connect"."listing_content"."purpose" = 'proposal' AND "app_store_connect"."listing_content"."whats_new" IS NOT NULL
+    WHEN 'unreadable' THEN "app_store_connect"."listing_content"."purpose" IN ('baseline','observation') AND "app_store_connect"."listing_content"."whats_new" IS NULL
+    ELSE false END) IS TRUE
+asc_listing_live_promo_text_shape: (CASE "app_store_connect"."listing_content"."live_promotional_text_state"
+    WHEN 'unspecified' THEN "app_store_connect"."listing_content"."live_promotional_text" IS NULL
+    WHEN 'present' THEN "app_store_connect"."listing_content"."live_promotional_text" IS NOT NULL AND length("app_store_connect"."listing_content"."live_promotional_text") > 0
+    WHEN 'empty' THEN "app_store_connect"."listing_content"."live_promotional_text" IS NOT NULL AND "app_store_connect"."listing_content"."live_promotional_text" = ''
+    WHEN 'dismissed' THEN "app_store_connect"."listing_content"."purpose" = 'proposal' AND "app_store_connect"."listing_content"."live_promotional_text" IS NOT NULL
+    WHEN 'unreadable' THEN "app_store_connect"."listing_content"."purpose" IN ('baseline','observation') AND "app_store_connect"."listing_content"."live_promotional_text" IS NULL
+    ELSE false END) IS TRUE
+asc_listing_app_info_observed_fields: (CASE WHEN "app_store_connect"."listing_content"."purpose" = 'proposal' THEN true
+    WHEN "app_store_connect"."listing_content"."app_info_availability" = 'present' THEN true
+    WHEN "app_store_connect"."listing_content"."app_info_availability" = 'unreadable' THEN "app_store_connect"."listing_content"."subtitle_state" IN ('unspecified','unreadable')
+    ELSE "app_store_connect"."listing_content"."subtitle_state" = 'unspecified' END) IS TRUE
+asc_listing_version_observed_fields: (CASE WHEN "app_store_connect"."listing_content"."purpose" = 'proposal' THEN true
+    WHEN "app_store_connect"."listing_content"."version_availability" = 'present' THEN true
+    WHEN "app_store_connect"."listing_content"."version_availability" = 'unreadable' THEN "app_store_connect"."listing_content"."keywords_state" IN ('unspecified','unreadable') AND "app_store_connect"."listing_content"."promotional_text_state" IN ('unspecified','unreadable') AND "app_store_connect"."listing_content"."whats_new_state" IN ('unspecified','unreadable')
+    ELSE "app_store_connect"."listing_content"."keywords_state" = 'unspecified' AND "app_store_connect"."listing_content"."promotional_text_state" = 'unspecified' AND "app_store_connect"."listing_content"."whats_new_state" = 'unspecified' END) IS TRUE
+asc_listing_live_observed_fields: (CASE WHEN "app_store_connect"."listing_content"."purpose" = 'proposal' THEN true
+    WHEN "app_store_connect"."listing_content"."live_promotional_availability" = 'present' THEN true
+    WHEN "app_store_connect"."listing_content"."live_promotional_availability" = 'unreadable' THEN "app_store_connect"."listing_content"."live_promotional_text_state" IN ('unspecified','unreadable')
+    ELSE "app_store_connect"."listing_content"."live_promotional_text_state" = 'unspecified' END) IS TRUE
+asc_listing_live_version_state: (CASE WHEN "app_store_connect"."listing_content"."live_promotional_availability" IN ('present','absent') THEN "app_store_connect"."listing_content"."live_promotional_native_state_kind" = 'known' AND "app_store_connect"."listing_content"."live_promotional_native_state" IN ('READY_FOR_SALE','READY_FOR_DISTRIBUTION') ELSE true END) IS TRUE
+asc_listing_same_localization_parent: (CASE WHEN "app_store_connect"."listing_content"."app_version_localization_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_localization_id" = "app_store_connect"."listing_content"."live_promotional_localization_id" THEN "app_store_connect"."listing_content"."app_version_id" = "app_store_connect"."listing_content"."live_promotional_version_id" ELSE true END) IS TRUE
+asc_listing_same_version_state: (CASE WHEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_id" = "app_store_connect"."listing_content"."live_promotional_version_id" AND "app_store_connect"."listing_content"."version_native_state_kind" = 'known' AND "app_store_connect"."listing_content"."live_promotional_native_state_kind" = 'known' THEN "app_store_connect"."listing_content"."version_native_state" = "app_store_connect"."listing_content"."live_promotional_native_state" ELSE true END) IS TRUE
+asc_listing_same_version_observation: (CASE WHEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_id" = "app_store_connect"."listing_content"."live_promotional_version_id" AND "app_store_connect"."listing_content"."version_availability" IN ('present','absent') AND "app_store_connect"."listing_content"."live_promotional_availability" IN ('present','absent') THEN "app_store_connect"."listing_content"."version_availability" = "app_store_connect"."listing_content"."live_promotional_availability" AND ("app_store_connect"."listing_content"."version_availability" = 'absent' OR "app_store_connect"."listing_content"."app_version_localization_id" = "app_store_connect"."listing_content"."live_promotional_localization_id") ELSE true END) IS TRUE
+asc_listing_same_version_proposal: (CASE WHEN "app_store_connect"."listing_content"."app_version_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_id" = "app_store_connect"."listing_content"."live_promotional_version_id" AND "app_store_connect"."listing_content"."version_operation" IN ('create','update') AND "app_store_connect"."listing_content"."live_promotional_operation" = 'update' THEN "app_store_connect"."listing_content"."version_operation" = 'update' AND "app_store_connect"."listing_content"."app_version_localization_id" = "app_store_connect"."listing_content"."live_promotional_localization_id" ELSE true END) IS TRUE
+asc_listing_same_localization_promo: (CASE WHEN "app_store_connect"."listing_content"."app_version_localization_id" IS NOT NULL AND "app_store_connect"."listing_content"."app_version_localization_id" = "app_store_connect"."listing_content"."live_promotional_localization_id" AND "app_store_connect"."listing_content"."promotional_text_state" IN ('present','empty') AND "app_store_connect"."listing_content"."live_promotional_text_state" IN ('present','empty') THEN "app_store_connect"."listing_content"."promotional_text" = "app_store_connect"."listing_content"."live_promotional_text" ELSE true END) IS TRUE
+```
+
 ## `review_work.reply_content`
 
 Exact review and reply values for proposals, baselines, and observations.
@@ -669,7 +899,7 @@ Exact native review/response identities, selected source link and connector, and
 | `purpose` | revision_purpose: proposal, baseline, observation, historical | No | FK → actions.revision.purpose |
 | `source_asset_data_source_id` | text | No | — |
 | `source_connector_id` | text | No | — |
-| `credential_kind` | review_credential_kind: individual, team | No | — |
+| `credential_kind` | credential_kind: individual, team | No | — |
 | `credential_key_id` | text | No | — |
 | `credential_team_issuer_id` | text | Yes | — |
 | `review_resource_id` | text | Yes | — |
