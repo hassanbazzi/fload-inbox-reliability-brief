@@ -2860,3 +2860,59 @@ BEGIN
   PERFORM set_config('lock_timeout', previous_lock_timeout, true);
 END;
 $applied_sweep_index$;
+
+-- 0160_foamy_colossus.sql
+-- Generated ordered index definitions:
+-- CREATE INDEX "review_app_date_page_idx" ON "review" USING btree ("app_id","platform","last_modified" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- CREATE INDEX "review_app_rating_page_idx" ON "review" USING btree ("app_id","platform","rating" DESC NULLS FIRST,"last_modified" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- CREATE INDEX "review_history_page_idx" ON "review_history" USING btree ("review_id","captured_at" DESC NULLS FIRST,"id" COLLATE "C" DESC);
+-- Populated heaps must be prepared CONCURRENTLY outside this transaction.
+-- See docs/review-browsing-index-preparation.md.
+DO $review_browsing_indexes$
+DECLARE
+  item record;
+  index_id oid;
+  previous_lock_timeout text := current_setting('lock_timeout');
+BEGIN
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('fload:review-browsing-indexes',0)) THEN
+    RAISE EXCEPTION 'Review browsing index preparation or migration is already running';
+  END IF;
+  PERFORM set_config('lock_timeout','5s',true);
+  -- Fixed order and bounded waits; prepared validation allows normal DML.
+  LOCK TABLE public.review, public.review_history IN SHARE UPDATE EXCLUSIVE MODE;
+  FOR item IN SELECT * FROM (VALUES
+    ('review_app_date_page_idx','review',4,
+     'CREATE INDEX review_app_date_page_idx ON public.review USING btree (app_id, platform, last_modified DESC, id COLLATE "C" DESC)'),
+    ('review_app_rating_page_idx','review',5,
+     'CREATE INDEX review_app_rating_page_idx ON public.review USING btree (app_id, platform, rating DESC, last_modified DESC, id COLLATE "C" DESC)'),
+    ('review_history_page_idx','review_history',3,
+     'CREATE INDEX review_history_page_idx ON public.review_history USING btree (review_id, captured_at DESC, id COLLATE "C" DESC)')
+  ) AS required(name,table_name,key_count,definition)
+  LOOP
+    index_id := to_regclass('public.' || item.name);
+    IF index_id IS NULL THEN
+      EXECUTE format('LOCK TABLE public.%I IN SHARE MODE',item.table_name);
+      -- Do not scan rows or trust estimates; only untouched empty heaps build
+      -- while holding this transactional write-excluding lock.
+      IF pg_relation_size(to_regclass('public.' || item.table_name)) <> 0 THEN
+        RAISE EXCEPTION 'Prepare public.% before migration: run packages/database/scripts/prepare-review-browsing-indexes.ts --database-name NAME --execute with the explicitly selected DATABASE_URL',item.name;
+      END IF;
+      EXECUTE item.definition;
+      index_id := to_regclass('public.' || item.name);
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+      WHERE i.indexrelid=index_id AND i.indrelid=to_regclass('public.' || item.table_name) AND c.relkind='i'
+        AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate
+        AND NOT i.indisprimary AND NOT i.indisexclusion AND NOT i.indnullsnotdistinct
+        AND i.indnkeyatts=item.key_count AND i.indnatts=item.key_count
+        AND i.indpred IS NULL AND i.indexprs IS NULL
+        AND pg_get_indexdef(i.indexrelid,0,false)=item.definition
+        AND NOT EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conindid=i.indexrelid)
+    ) THEN
+      RAISE EXCEPTION 'public.% has a mismatched definition, constraint owner, or invalid build state; operator inspection is required',item.name;
+    END IF;
+  END LOOP;
+  PERFORM set_config('lock_timeout',previous_lock_timeout,true);
+END;
+$review_browsing_indexes$;
