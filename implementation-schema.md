@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0163. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0168: 19 relations, 286 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -131,6 +131,7 @@ Who asked for what, when it was accepted, and the immutable recovery-cycle scope
 
 ```sql
 execution_cycle_successor: UNIQUE INDEX (organization_id ASC, cycle_predecessor_command_id ASC) WHERE "actions"."command"."kind" IN ('reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+execution_attempt_completion_command: UNIQUE INDEX (organization_id ASC, progress_subject_attempt_id ASC) WHERE "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted'
 command_history_page: INDEX (organization_id ASC, accepted_at DESC, "id" COLLATE "C" DESC ASC)
 command_execution_step_identity: UNIQUE (organization_id, progress_execution_id, progress_step_id, id)
 command_tenant_identity: UNIQUE (organization_id, id)
@@ -160,6 +161,10 @@ command_cycle_shape: CASE
             WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             ELSE false END
+        WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         END
 command_cycle_planned_step_distinct: "actions"."command"."cycle_planned_step_id" IS NULL OR "actions"."command"."cycle_planned_step_id" IS DISTINCT FROM "actions"."command"."progress_step_id"
@@ -293,13 +298,14 @@ membership_ordinal_nonnegative: "actions"."membership"."ordinal" >= 0
 
 ## `actions.read`
 
-One person’s read watermark. It cannot change shared workflow.
+One person’s read watermark and compare-and-swap version. A delayed acknowledgement cannot undo a newer personal choice.
 
 | Field | SQL type / enum | Nullable | Key / default |
 | --- | --- | --- | --- |
 | `organization_id` | text | No | PK; FK → actions.action.organization_id |
 | `user_id` | text | No | PK; FK → public.user.id |
 | `action_id` | text | No | PK; FK → actions.action.id |
+| `read_version` | bigint | No | Default: 1 |
 | `seen_attention_version` | bigint | No | — |
 | `force_unread` | boolean | No | Default: False |
 | `updated_at` | timestamp with time zone | No | Default: now() |
@@ -310,6 +316,7 @@ read_user_id_user_id_fk: (user_id) → public.user (id)
 read_action_scope: (organization_id, action_id) → actions.action (organization_id, id)
 read_instant_bounds: ("actions"."read"."updated_at" IS NULL OR "actions"."read"."updated_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
 read_watermark_nonnegative: "actions"."read"."seen_attention_version" >= 0
+read_version_positive: "actions"."read"."read_version" > 0
 ```
 
 ## `actions.alias`
@@ -611,6 +618,7 @@ Exact review and reply values for proposals, baselines, and observations.
 | `review_nickname` | text | Yes | — |
 | `review_storefront` | text | Yes | — |
 | `review_app_version` | text | Yes | — |
+| `review_created_at` | timestamp with time zone | Yes | — |
 | `review_modified_at` | timestamp with time zone | Yes | — |
 | `review_edited` | boolean | Yes | — |
 | `captured_at` | timestamp with time zone | Yes | — |
@@ -640,26 +648,30 @@ review_content_response_shape: "review_work"."reply_content"."purpose" = 'propos
       AND "review_work"."reply_content"."response_hidden" IS NULL AND "review_work"."reply_content"."publication_state" IS NULL))
 review_content_snapshot_shape: (
     "review_work"."reply_content"."review_snapshot_availability" = 'present' AND "review_work"."reply_content"."review_rating" IS NOT NULL AND "review_work"."reply_content"."review_title" IS NOT NULL
-    AND "review_work"."reply_content"."review_body" IS NOT NULL AND "review_work"."reply_content"."review_nickname" IS NOT NULL AND "review_work"."reply_content"."review_modified_at" IS NOT NULL AND "review_work"."reply_content"."review_edited" IS NOT NULL
+    AND "review_work"."reply_content"."review_body" IS NOT NULL AND "review_work"."reply_content"."review_nickname" IS NOT NULL
   ) OR (
     "review_work"."reply_content"."review_snapshot_availability" <> 'present' AND "review_work"."reply_content"."review_rating" IS NULL AND "review_work"."reply_content"."review_title" IS NULL
     AND "review_work"."reply_content"."review_body" IS NULL AND "review_work"."reply_content"."review_nickname" IS NULL AND "review_work"."reply_content"."review_storefront" IS NULL
-    AND "review_work"."reply_content"."review_app_version" IS NULL AND "review_work"."reply_content"."review_modified_at" IS NULL AND "review_work"."reply_content"."review_edited" IS NULL
+    AND "review_work"."reply_content"."review_app_version" IS NULL AND "review_work"."reply_content"."review_created_at" IS NULL AND "review_work"."reply_content"."review_modified_at" IS NULL AND "review_work"."reply_content"."review_edited" IS NULL
   )
 review_content_rating: "review_work"."reply_content"."review_rating" IS NULL OR "review_work"."reply_content"."review_rating" BETWEEN 1 AND 5
-review_content_instant_range: ("review_work"."reply_content"."review_modified_at" IS NULL OR "review_work"."reply_content"."review_modified_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."response_modified_at" IS NULL OR "review_work"."reply_content"."response_modified_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."captured_at" IS NULL OR "review_work"."reply_content"."captured_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+review_content_instant_range: ("review_work"."reply_content"."review_created_at" IS NULL OR "review_work"."reply_content"."review_created_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."review_modified_at" IS NULL OR "review_work"."reply_content"."review_modified_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."response_modified_at" IS NULL OR "review_work"."reply_content"."response_modified_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."captured_at" IS NULL OR "review_work"."reply_content"."captured_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
 ```
 
 ## `app_store_connect.review_target`
 
-Apple-owned native review/response identities and source-specific state.
+Exact native review/response identities, selected source link and connector, and the actual individual or team signing principal. No inferred Apple account ID.
 
 | Field | SQL type / enum | Nullable | Key / default |
 | --- | --- | --- | --- |
 | `organization_id` | text | No | PK; FK → actions.revision.organization_id |
 | `revision_id` | text | No | PK; FK → actions.revision.id |
 | `purpose` | revision_purpose: proposal, baseline, observation, historical | No | FK → actions.revision.purpose |
-| `provider_account_id` | text | No | — |
+| `source_asset_data_source_id` | text | No | — |
+| `source_connector_id` | text | No | — |
+| `credential_kind` | review_credential_kind: individual, team | No | — |
+| `credential_key_id` | text | No | — |
+| `credential_team_issuer_id` | text | Yes | — |
 | `review_resource_id` | text | Yes | — |
 | `response_id` | text | Yes | — |
 | `native_state_source` | review_native_state_source: api_publication, browser_pending | Yes | — |
@@ -669,7 +681,10 @@ Apple-owned native review/response identities and source-specific state.
 review_target_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
 asc_review_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
 asc_review_target_purpose: "app_store_connect"."review_target"."purpose" IN ('proposal', 'baseline', 'observation')
-asc_review_target_identity: length("app_store_connect"."review_target"."provider_account_id") > 0 AND ("app_store_connect"."review_target"."review_resource_id" IS NULL OR length("app_store_connect"."review_target"."review_resource_id") > 0) AND ("app_store_connect"."review_target"."response_id" IS NULL OR length("app_store_connect"."review_target"."response_id") > 0)
+asc_review_target_identity: length("app_store_connect"."review_target"."source_asset_data_source_id") > 0 AND length("app_store_connect"."review_target"."source_connector_id") > 0 AND length("app_store_connect"."review_target"."credential_key_id") > 0
+        AND ("app_store_connect"."review_target"."review_resource_id" IS NULL OR length("app_store_connect"."review_target"."review_resource_id") > 0) AND ("app_store_connect"."review_target"."response_id" IS NULL OR length("app_store_connect"."review_target"."response_id") > 0)
+asc_review_target_credential_shape: ("app_store_connect"."review_target"."credential_kind" = 'individual' AND "app_store_connect"."review_target"."credential_team_issuer_id" IS NULL)
+          OR ("app_store_connect"."review_target"."credential_kind" = 'team' AND "app_store_connect"."review_target"."credential_team_issuer_id" IS NOT NULL AND length("app_store_connect"."review_target"."credential_team_issuer_id") > 0)
 asc_review_target_proposal_state: "app_store_connect"."review_target"."purpose" <> 'proposal' OR ("app_store_connect"."review_target"."native_state" IS NULL AND "app_store_connect"."review_target"."native_state_source" IS NULL)
 asc_review_target_state_source: 
         ("app_store_connect"."review_target"."native_state" IS NULL OR "app_store_connect"."review_target"."native_state_source" IS NOT NULL)

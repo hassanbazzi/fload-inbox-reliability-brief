@@ -1763,3 +1763,519 @@ BEGIN
     RAISE EXCEPTION 'Provider completion evidence owner is not installed' USING ERRCODE='23514';
   END IF;
 END $$;
+
+-- 0164_charming_exiles.sql
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_cycle_shape";--> statement-breakpoint
+CREATE UNIQUE INDEX "execution_attempt_completion_command" ON "actions"."command" USING btree ("organization_id","progress_subject_attempt_id") WHERE "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted';--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_cycle_shape" CHECK (CASE
+        WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
+          AND CASE "actions"."command"."kind"
+            WHEN 'open_recovery' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NULL
+            WHEN 'reconcile' THEN "actions"."command"."principal_kind" IN ('user','api_key') AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            WHEN 'resume_hold' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            ELSE false END
+          AND CASE "actions"."command"."cycle_purpose"
+            WHEN 'binding' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'prewrite' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NOT NULL
+            WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            ELSE false END
+        WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        END);
+--> statement-breakpoint
+--> statement-breakpoint
+--> statement-breakpoint
+-- FLO-1355 immutable ASC write capture completion
+-- FLO-1355 immutable ASC write capture completion.
+-- Commands retain captures; they never authorize another provider interaction.
+CREATE FUNCTION actions.check_write_capture_shape(candidate actions.execution_attempt) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE original actions.execution_attempt;
+BEGIN
+  IF candidate.kind NOT IN ('late_evidence','conflicting_completion') THEN RETURN; END IF;
+  SELECT * INTO original FROM actions.execution_attempt
+    WHERE organization_id=candidate.organization_id AND execution_id=candidate.execution_id
+      AND step_id=candidate.step_id AND id=candidate.subject_attempt_id;
+  IF NOT FOUND OR original.kind<>'write' OR candidate.number<=original.number THEN
+    RAISE EXCEPTION 'Write capture requires its exact earlier original write' USING ERRCODE='23514';
+  END IF;
+  IF ROW(candidate.claim_generation,candidate.claim_token,candidate.started_at,candidate.connector_id,
+      candidate.agent_run_id,candidate.input_attempt_id,candidate.input_parent_revision_id,
+      candidate.inspection_purpose,candidate.planned_write_step_id,candidate.prewrite_attempt_id,
+      candidate.resource_guard_generation)
+    IS DISTINCT FROM ROW(original.claim_generation,original.claim_token,original.started_at,original.connector_id,
+      original.agent_run_id,original.input_attempt_id,original.input_parent_revision_id,
+      original.inspection_purpose,original.planned_write_step_id,original.prewrite_attempt_id,
+      original.resource_guard_generation) THEN
+    RAISE EXCEPTION 'Write capture must preserve the complete original admission identity' USING ERRCODE='23514';
+  END IF;
+  IF candidate.finished_at IS NULL OR candidate.finished_at>candidate.recorded_at
+    OR candidate.result IS NULL OR candidate.result NOT IN ('acknowledged','known_not_applied','uncertain')
+    OR candidate.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired'
+    OR num_nonnulls(candidate.terminal_outcome,candidate.semantic_fingerprint,candidate.fingerprint_version,
+      candidate.observation_revision_id,candidate.comparison_version,candidate.observation_surface,
+      candidate.observation_completeness,candidate.output_kind,candidate.output_revision_id,
+      candidate.output_review_analysis_id,candidate.output_agent_run_id,candidate.no_work_reason)>0 THEN
+    RAISE EXCEPTION 'Write capture requires closed original write result fields and original completion time' USING ERRCODE='23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app_store_connect.check_review_write_receipt(candidate actions.execution_attempt) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE c composition.operation_contract; r app_store_connect.attempt_receipt; target app_store_connect.review_target; content review_work.reply_content; head actions.revision;
+BEGIN
+  SELECT oc.* INTO c FROM actions.execution_step s JOIN composition.operation_contract oc ON oc.id=s.operation_contract_id
+    WHERE s.organization_id=candidate.organization_id AND s.execution_id=candidate.execution_id AND s.id=candidate.step_id;
+  IF NOT FOUND OR c.id IS DISTINCT FROM 'asc.review_response_upsert@1' OR c.provider IS DISTINCT FROM 'app_store_connect' OR c.operation_key IS DISTINCT FROM 'review_response_upsert' OR c.contract_version IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'ASC review receipt requires the exact immutable upsert definition' USING ERRCODE='23514';
+  END IF;
+  IF candidate.kind NOT IN ('write','late_evidence','conflicting_completion') THEN RAISE EXCEPTION 'ASC review receipt owner requires a write capture' USING ERRCODE='23514'; END IF;
+  PERFORM actions.check_write_capture_shape(candidate);
+  IF num_nonnulls(candidate.terminal_outcome,candidate.semantic_fingerprint,candidate.fingerprint_version,candidate.observation_revision_id,candidate.comparison_version,candidate.observation_surface,candidate.observation_completeness,candidate.output_kind,candidate.output_revision_id,candidate.output_review_analysis_id,candidate.output_agent_run_id,candidate.no_work_reason)>0 THEN
+    RAISE EXCEPTION 'ASC write capture cannot carry readback or generation evidence' USING ERRCODE='23514';
+  END IF;
+  SELECT rev.* INTO head FROM actions.execution_step s JOIN actions.revision rev ON rev.organization_id=s.organization_id AND rev.id=s.content_revision_id
+    WHERE s.organization_id=candidate.organization_id AND s.execution_id=candidate.execution_id AND s.id=candidate.step_id;
+  SELECT * INTO target FROM app_store_connect.review_target WHERE organization_id=candidate.organization_id AND revision_id=head.id;
+  SELECT * INTO content FROM review_work.reply_content WHERE organization_id=candidate.organization_id AND revision_id=head.id;
+  IF head.id IS NULL OR NOT head.sealed OR head.kind<>'review_reply' OR head.purpose<>'proposal' OR target.review_resource_id IS NULL OR target.purpose<>'proposal' OR content.store IS DISTINCT FROM 'ios' THEN
+    RAISE EXCEPTION 'ASC review receipt requires its exact sealed and bound review target' USING ERRCODE='23514';
+  END IF;
+  SELECT * INTO r FROM app_store_connect.attempt_receipt WHERE organization_id=candidate.organization_id AND attempt_id=candidate.id;
+  IF candidate.finished_at IS NULL THEN
+    IF r.attempt_id IS NOT NULL THEN RAISE EXCEPTION 'ASC receipt and attempt finalization must commit together' USING ERRCODE='23514'; END IF;
+    RETURN;
+  END IF;
+  IF (candidate.result='acknowledged' AND candidate.failure_class IS NOT NULL) OR ((candidate.result='known_not_applied' OR (candidate.result='uncertain' AND candidate.uncertainty_reason<>'claim_expired')) AND candidate.failure_class IS NULL) THEN
+    RAISE EXCEPTION 'ASC write outcome requires its closed failure-class shape' USING ERRCODE='23514';
+  END IF;
+  IF (candidate.result='known_not_applied' AND candidate.non_application_basis='pre_dispatch_failure') OR (candidate.result='uncertain' AND candidate.uncertainty_reason IN ('transport_lost','claim_expired')) THEN
+    IF r.attempt_id IS NOT NULL THEN RAISE EXCEPTION 'Receipt is forbidden for receipt-free outcomes' USING ERRCODE='23514'; END IF;
+    RETURN;
+  END IF;
+  IF r.attempt_id IS NULL OR r.transport<>'asc_api' THEN RAISE EXCEPTION 'ASC review completion requires its exact API receipt' USING ERRCODE='23514'; END IF;
+  IF r.response_kind='accepted' THEN
+    IF candidate.result IS DISTINCT FROM 'acknowledged' OR (r.response_body IS NOT NULL AND r.response_body IS DISTINCT FROM content.reply_text) THEN
+      RAISE EXCEPTION 'Acknowledgement must retain the accepted exact review response' USING ERRCODE='23514';
+    END IF;
+  ELSIF r.response_kind='http_error' AND r.error_code IS NOT NULL AND r.response_status IN (400,401,403,409,422,429) THEN
+    IF candidate.result IS DISTINCT FROM 'known_not_applied' OR candidate.non_application_basis IS DISTINCT FROM 'provider_rejection' OR candidate.retry_disposition IS NULL OR candidate.failure_class IS NULL THEN
+      RAISE EXCEPTION 'ASC decoded rejection requires its neutral non-application shape' USING ERRCODE='23514';
+    END IF;
+  ELSIF r.response_kind IN ('http_error','invalid_response') THEN
+    IF candidate.result IS DISTINCT FROM 'uncertain' OR candidate.uncertainty_reason IS DISTINCT FROM 'invalid_response' THEN
+      RAISE EXCEPTION 'Unproved ASC response remains uncertain' USING ERRCODE='23514';
+    END IF;
+  ELSE RAISE EXCEPTION 'Receipt is not admitted by the ASC upsert operation' USING ERRCODE='23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION app_store_connect.guard_review_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE a actions.execution_attempt; parent_execution text;
+BEGIN
+  IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'ASC attempt receipts are immutable' USING ERRCODE='23514'; END IF;
+  SELECT execution_id INTO parent_execution FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND id=NEW.attempt_id;
+  -- A new finished evidence parent may be inserted later in this transaction.
+  -- The deferred FK and receipt commit trigger require that exact scoped parent.
+  IF parent_execution IS NULL THEN RETURN NEW; END IF;
+  PERFORM 1 FROM actions.execution WHERE organization_id=NEW.organization_id AND id=parent_execution FOR UPDATE;
+  SELECT * INTO a FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND id=NEW.attempt_id;
+  IF NOT FOUND OR a.kind<>'write' OR a.finished_at IS NOT NULL THEN RAISE EXCEPTION 'ASC receipt cannot attach to finalized or non-write history' USING ERRCODE='23514'; END IF;
+  -- At this instant the row is unfinished and no receipt has been inserted yet.
+  PERFORM app_store_connect.check_review_write_receipt(a);
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION composition.check_execution_attempt_owner(candidate actions.execution_attempt) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE provider_kind composition.provider; contract_id text;
+BEGIN
+  SELECT c.provider,c.id INTO provider_kind,contract_id FROM actions.execution_step s JOIN composition.operation_contract c ON c.id=s.operation_contract_id
+    WHERE s.organization_id=candidate.organization_id AND s.execution_id=candidate.execution_id AND s.id=candidate.step_id;
+  IF NOT FOUND OR provider_kind='internal' THEN
+    RAISE EXCEPTION 'Execution attempt owner is not installed for this shape' USING ERRCODE='23514';
+  END IF;
+  IF candidate.prewrite_attempt_id IS NOT NULL OR candidate.input_attempt_id IS NOT NULL THEN
+    RAISE EXCEPTION 'Execution input evidence owner is not installed' USING ERRCODE='23514';
+  END IF;
+  IF contract_id='asc.review_response_upsert@1' THEN
+    PERFORM app_store_connect.check_review_write_receipt(candidate);
+    RETURN;
+  END IF;
+  IF candidate.kind<>'write' THEN RAISE EXCEPTION 'Captured evidence owner is not installed for this operation' USING ERRCODE='23514'; END IF;
+  IF EXISTS(SELECT 1 FROM app_store_connect.attempt_receipt r WHERE r.organization_id=candidate.organization_id AND r.attempt_id=candidate.id) THEN
+    RAISE EXCEPTION 'ASC receipt cannot finalize another operation' USING ERRCODE='23514';
+  END IF;
+  IF candidate.finished_at IS NOT NULL AND NOT (
+    (candidate.result='known_not_applied' AND candidate.non_application_basis='pre_dispatch_failure')
+    OR (candidate.result='uncertain' AND candidate.uncertainty_reason IN ('transport_lost','claim_expired'))
+  ) THEN
+    RAISE EXCEPTION 'Provider completion evidence owner is not installed' USING ERRCODE='23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.guard_execution_attempt() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; g actions.resource_guard;
+BEGIN
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Attempt deletion requires erasure authority' USING ERRCODE='23514'; END IF;
+  SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.execution_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Attempt requires its exact execution' USING ERRCODE='23514'; END IF;
+  IF TG_OP='UPDATE' THEN
+    IF OLD.finished_at IS NOT NULL THEN RAISE EXCEPTION 'Finished attempt is immutable' USING ERRCODE='23514'; END IF;
+    IF ROW(NEW.id,NEW.organization_id,NEW.execution_id,NEW.step_id,NEW.number,NEW.kind,NEW.claim_generation,NEW.claim_token,NEW.subject_attempt_id,NEW.input_attempt_id,NEW.input_parent_revision_id,NEW.connector_id,NEW.agent_run_id,NEW.started_at,NEW.recorded_at,NEW.inspection_purpose,NEW.planned_write_step_id,NEW.prewrite_attempt_id,NEW.resource_guard_generation,NEW.cycle_command_id,NEW.capture_digest,NEW.capture_digest_version)
+      IS DISTINCT FROM ROW(OLD.id,OLD.organization_id,OLD.execution_id,OLD.step_id,OLD.number,OLD.kind,OLD.claim_generation,OLD.claim_token,OLD.subject_attempt_id,OLD.input_attempt_id,OLD.input_parent_revision_id,OLD.connector_id,OLD.agent_run_id,OLD.started_at,OLD.recorded_at,OLD.inspection_purpose,OLD.planned_write_step_id,OLD.prewrite_attempt_id,OLD.resource_guard_generation,OLD.cycle_command_id,OLD.capture_digest,OLD.capture_digest_version) THEN
+      RAISE EXCEPTION 'Attempt admission identity is immutable' USING ERRCODE='23514';
+    END IF;
+    IF NEW.finished_at IS NULL THEN RAISE EXCEPTION 'An original attempt can only be updated to finalize once' USING ERRCODE='23514'; END IF;
+  ELSE
+    IF NEW.kind IN ('write','readback','inspection','generation') AND NEW.finished_at IS NOT NULL THEN
+      RAISE EXCEPTION 'Original worker attempts must be durably admitted unfinished' USING ERRCODE='23514';
+    END IF;
+    IF NEW.kind NOT IN ('late_evidence','conflicting_completion') AND NEW.connector_id IS NOT NULL THEN
+      PERFORM 1 FROM public.data_connector c WHERE c.id=NEW.connector_id AND c."organizationId"=NEW.organization_id FOR KEY SHARE;
+      IF NOT FOUND THEN RAISE EXCEPTION 'Attempt connector must exist in its tenant at admission' USING ERRCODE='23514'; END IF;
+    END IF;
+    IF NEW.kind NOT IN ('late_evidence','conflicting_completion') AND NEW.agent_run_id IS NOT NULL THEN
+      PERFORM 1 FROM public.agent_run r WHERE r.id=NEW.agent_run_id AND r."organizationId"=NEW.organization_id FOR KEY SHARE;
+      IF NOT FOUND THEN RAISE EXCEPTION 'Attempt run must exist in its tenant at admission' USING ERRCODE='23514'; END IF;
+    END IF;
+  END IF;
+  PERFORM composition.check_execution_attempt_owner(NEW);
+  -- Evidence keeps the original fence; a later worker claim has no authority over it.
+  IF NEW.kind IN ('late_evidence','conflicting_completion') THEN RETURN NEW; END IF;
+  IF TG_OP='INSERT' AND EXISTS(SELECT 1 FROM actions.execution_attempt c WHERE c.organization_id=NEW.organization_id AND c.execution_id=NEW.execution_id AND c.kind='conflicting_completion') THEN
+    RAISE EXCEPTION 'Unresolved capture conflict forbids new automatic interactions' USING ERRCODE='23514';
+  END IF;
+  IF e.phase<>'claimed' OR e.claim_token IS NULL OR e.claim_expires_at IS NULL THEN
+    RAISE EXCEPTION 'Original attempt requires the execution claim' USING ERRCODE='23514';
+  END IF;
+  IF TG_OP='INSERT' THEN
+    IF NEW.claim_generation<>e.claim_generation OR NEW.claim_token<>e.claim_token OR clock_timestamp()>=e.claim_expires_at THEN
+      RAISE EXCEPTION 'Attempt admission fence must be current and unexpired' USING ERRCODE='23514';
+    END IF;
+    IF NEW.kind='write' THEN
+      SELECT * INTO g FROM actions.resource_guard WHERE id=e.resource_guard_id FOR UPDATE;
+      IF NOT FOUND OR g.holder_organization_id IS DISTINCT FROM e.organization_id OR g.holder_execution_id IS DISTINCT FROM e.id OR g.acquisition_generation IS DISTINCT FROM NEW.resource_guard_generation THEN
+        RAISE EXCEPTION 'Write requires the exact held resource generation' USING ERRCODE='23514';
+      END IF;
+    END IF;
+  ELSE
+    IF NEW.finalized_claim_generation IS DISTINCT FROM e.claim_generation OR NEW.finalized_claim_token IS DISTINCT FROM e.claim_token
+      OR (clock_timestamp()>=e.claim_expires_at AND NOT (NEW.result='uncertain' AND NEW.uncertainty_reason='claim_expired')) THEN
+      RAISE EXCEPTION 'Attempt finalization requires the exact current fence' USING ERRCODE='23514';
+    END IF;
+    -- Expiry is database-only uncertainty, never a claim that the write failed.
+    IF NEW.result='uncertain' AND NEW.uncertainty_reason='claim_expired' AND clock_timestamp()<e.claim_expires_at THEN
+      RAISE EXCEPTION 'A live claim cannot be classified as expired' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION actions.check_attempt_completion_command() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE c actions.command; captured actions.execution_attempt; ticket_id text;
+BEGIN
+  IF TG_TABLE_NAME='command' THEN
+    c:=NEW;
+    IF c.kind<>'record_attempt' OR c.outcome<>'accepted' THEN RETURN NULL; END IF;
+    SELECT * INTO captured FROM actions.execution_attempt WHERE organization_id=c.organization_id
+      AND execution_id=c.progress_execution_id AND step_id=c.progress_step_id AND id=c.progress_subject_attempt_id;
+  ELSE
+    SELECT * INTO captured FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND id=NEW.id;
+    IF captured.finished_at IS NULL THEN RETURN NULL; END IF;
+    IF captured.kind IN ('late_evidence','conflicting_completion') THEN
+      SELECT * INTO c FROM actions.command WHERE organization_id=captured.organization_id AND id=captured.evidence_command_id;
+    ELSIF captured.kind='write' AND NOT (captured.result='uncertain' AND captured.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired')
+      AND EXISTS(SELECT 1 FROM actions.execution_step s WHERE s.organization_id=captured.organization_id
+        AND s.execution_id=captured.execution_id AND s.id=captured.step_id AND s.operation_contract_id='asc.review_response_upsert@1') THEN
+      SELECT * INTO c FROM actions.command WHERE organization_id=captured.organization_id
+        AND kind='record_attempt' AND outcome='accepted' AND progress_subject_attempt_id=captured.id;
+    ELSE RETURN NULL;
+    END IF;
+  END IF;
+  IF captured.id IS NULL OR captured.finished_at IS NULL OR c.id IS NULL
+    OR c.kind<>'record_attempt' OR c.outcome<>'accepted' OR c.principal_kind<>'system' OR c.channel<>'worker'
+    OR c.progress_execution_id IS DISTINCT FROM captured.execution_id
+    OR c.progress_step_id IS DISTINCT FROM captured.step_id
+    OR c.progress_subject_attempt_id IS DISTINCT FROM captured.id
+    OR c.accepted_at<captured.finished_at
+    OR (captured.kind IN ('late_evidence','conflicting_completion') AND captured.evidence_command_id IS DISTINCT FROM c.id) THEN
+    RAISE EXCEPTION 'Captured completion requires its exact accepted system command' USING ERRCODE='23514';
+  END IF;
+  SELECT ap.action_id INTO ticket_id FROM actions.execution e JOIN actions.approval ap
+    ON ap.organization_id=e.organization_id AND ap.id=e.approval_id
+    WHERE e.organization_id=captured.organization_id AND e.id=captured.execution_id;
+  IF NOT EXISTS(SELECT 1 FROM actions.command_target t WHERE t.organization_id=c.organization_id
+    AND t.command_id=c.id AND t.action_id=ticket_id) OR EXISTS(SELECT 1 FROM actions.command_target t
+    WHERE t.organization_id=c.organization_id AND t.command_id=c.id AND t.action_id<>ticket_id) THEN
+    RAISE EXCEPTION 'Captured completion history must target its exact approved ticket' USING ERRCODE='23514';
+  END IF;
+  PERFORM composition.check_execution_attempt_owner(captured);
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER command_attempt_completion_commit AFTER INSERT ON actions.command
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_attempt_completion_command();
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER attempt_completion_command_commit AFTER INSERT OR UPDATE ON actions.execution_attempt
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_attempt_completion_command();
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.guard_resource_identity() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='DELETE' THEN RAISE EXCEPTION 'Global resource identity cannot be deleted by runtime' USING ERRCODE='23514'; END IF;
+  IF TG_OP='INSERT' THEN
+    IF NEW.holder_execution_id IS NOT NULL OR NEW.acquisition_generation<>0 THEN
+      RAISE EXCEPTION 'A resource identity starts unheld at generation zero' USING ERRCODE='23514';
+    END IF;
+  ELSE
+    IF ROW(NEW.id,NEW.provider,NEW.resource_key,NEW.key_version) IS DISTINCT FROM ROW(OLD.id,OLD.provider,OLD.resource_key,OLD.key_version) THEN
+      RAISE EXCEPTION 'Global resource identity is immutable' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt c WHERE c.organization_id=OLD.holder_organization_id
+        AND c.execution_id=OLD.holder_execution_id AND c.kind='conflicting_completion'
+    ) THEN RAISE EXCEPTION 'Unresolved capture conflict forbids resource release' USING ERRCODE='23514'; END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NULL AND EXISTS (
+      SELECT 1 FROM actions.execution_attempt a
+      WHERE a.organization_id=OLD.holder_organization_id AND a.execution_id=OLD.holder_execution_id
+        AND a.kind IN ('write','readback','inspection','generation','manual_observation')
+        AND (a.finished_at IS NULL OR (a.kind='write' AND NOT (
+          a.result IS NOT DISTINCT FROM 'known_not_applied'
+          AND a.non_application_basis IS NOT DISTINCT FROM 'pre_dispatch_failure')))
+    ) THEN
+      -- Narrow installed primitive: no effect was dispatched. Native finality,
+      -- late evidence and cleanup must replace this with their full owner proof.
+      RAISE EXCEPTION 'Resource release requires proved finality for every original interaction' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NULL AND NEW.holder_execution_id IS NOT NULL THEN
+      IF NEW.acquisition_generation<>OLD.acquisition_generation+1 THEN RAISE EXCEPTION 'Resource acquisition requires next generation' USING ERRCODE='23514'; END IF;
+    ELSIF NEW.acquisition_generation<>OLD.acquisition_generation THEN
+      RAISE EXCEPTION 'Resource generation changes only on acquisition' USING ERRCODE='23514';
+    END IF;
+    IF OLD.holder_execution_id IS NOT NULL AND NEW.holder_execution_id IS NOT NULL
+      AND ROW(NEW.holder_organization_id,NEW.holder_execution_id,NEW.acquired_at) IS DISTINCT FROM ROW(OLD.holder_organization_id,OLD.holder_execution_id,OLD.acquired_at) THEN
+      RAISE EXCEPTION 'A held resource cannot change holder or acquisition time' USING ERRCODE='23514';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.guard_execution_step() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; ap actions.approval; r actions.revision;
+BEGIN
+  IF TG_OP <> 'INSERT' THEN RAISE EXCEPTION 'Execution steps are immutable' USING ERRCODE='23514'; END IF;
+  SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.execution_id FOR UPDATE;
+  IF NOT FOUND OR e.phase IN ('settled','cancelled') OR e.plan_complete OR e.writes_closed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'A step requires an existing open execution plan' USING ERRCODE='23514';
+  END IF;
+  IF EXISTS(SELECT 1 FROM actions.execution_attempt c WHERE c.organization_id=NEW.organization_id
+    AND c.execution_id=NEW.execution_id AND c.kind='conflicting_completion') THEN
+    RAISE EXCEPTION 'Unresolved capture conflict forbids plan expansion' USING ERRCODE='23514';
+  END IF;
+  SELECT * INTO ap FROM actions.approval WHERE organization_id=e.organization_id AND id=e.approval_id;
+  SELECT * INTO r FROM actions.revision WHERE organization_id=NEW.organization_id AND id=NEW.content_revision_id;
+  IF NOT FOUND OR NOT r.sealed OR r.purpose<>'proposal' OR ap.id IS NULL OR r.id IS DISTINCT FROM ap.revision_id OR r.action_id IS DISTINCT FROM ap.action_id THEN
+    RAISE EXCEPTION 'Step content must be the exact sealed approved proposal' USING ERRCODE='23514';
+  END IF;
+  IF NEW.input_step_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM actions.execution_step s WHERE s.organization_id=NEW.organization_id AND s.execution_id=NEW.execution_id AND s.id=NEW.input_step_id AND s.ordinal<NEW.ordinal) THEN
+    RAISE EXCEPTION 'Step input must be an earlier immutable step in this execution' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+
+-- 0165_damp_prima.sql
+ALTER TABLE "review_work"."reply_content" DROP CONSTRAINT "review_content_snapshot_shape";--> statement-breakpoint
+ALTER TABLE "review_work"."reply_content" DROP CONSTRAINT "review_content_instant_range";--> statement-breakpoint
+ALTER TABLE "review_work"."reply_content" ADD COLUMN "review_created_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "review_work"."reply_content" ADD CONSTRAINT "review_content_snapshot_shape" CHECK ((
+    "review_work"."reply_content"."review_snapshot_availability" = 'present' AND "review_work"."reply_content"."review_rating" IS NOT NULL AND "review_work"."reply_content"."review_title" IS NOT NULL
+    AND "review_work"."reply_content"."review_body" IS NOT NULL AND "review_work"."reply_content"."review_nickname" IS NOT NULL
+  ) OR (
+    "review_work"."reply_content"."review_snapshot_availability" <> 'present' AND "review_work"."reply_content"."review_rating" IS NULL AND "review_work"."reply_content"."review_title" IS NULL
+    AND "review_work"."reply_content"."review_body" IS NULL AND "review_work"."reply_content"."review_nickname" IS NULL AND "review_work"."reply_content"."review_storefront" IS NULL
+    AND "review_work"."reply_content"."review_app_version" IS NULL AND "review_work"."reply_content"."review_created_at" IS NULL AND "review_work"."reply_content"."review_modified_at" IS NULL AND "review_work"."reply_content"."review_edited" IS NULL
+  ));--> statement-breakpoint
+ALTER TABLE "review_work"."reply_content" ADD CONSTRAINT "review_content_instant_range" CHECK (("review_work"."reply_content"."review_created_at" IS NULL OR "review_work"."reply_content"."review_created_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."review_modified_at" IS NULL OR "review_work"."reply_content"."review_modified_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."response_modified_at" IS NULL OR "review_work"."reply_content"."response_modified_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("review_work"."reply_content"."captured_at" IS NULL OR "review_work"."reply_content"."captured_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz));
+-- 0166_wild_doorman.sql
+ALTER TABLE "actions"."read" ADD COLUMN "read_version" bigint DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "actions"."read" ADD CONSTRAINT "read_version_positive" CHECK ("actions"."read"."read_version" > 0);
+-- 0167_review_response_baseline.sql
+-- Every actionable review proposal pins actual absent/present response evidence.
+-- No imported or unavailable review snapshot is upgraded into authorization.
+CREATE OR REPLACE FUNCTION app_store_connect.check_review_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE content review_work.reply_content; target app_store_connect.review_target;
+  baseline app_store_connect.review_target; expected_publication text;
+BEGIN
+  SELECT * INTO content FROM review_work.reply_content c WHERE c.organization_id = revision.organization_id AND c.revision_id = revision.id;
+  IF NOT FOUND OR content.store <> 'ios' THEN RAISE EXCEPTION 'ASC review target requires iOS review content' USING ERRCODE = '23514'; END IF;
+  SELECT * INTO target FROM app_store_connect.review_target t WHERE t.organization_id = revision.organization_id AND t.revision_id = revision.id;
+  IF NOT FOUND OR target.purpose <> revision.purpose THEN RAISE EXCEPTION 'Missing exact ASC review target leaf' USING ERRCODE = '23514'; END IF;
+  IF revision.purpose = 'proposal' THEN
+    IF (content.intent = 'update') IS DISTINCT FROM (target.response_id IS NOT NULL) OR target.native_state IS NOT NULL OR target.native_state_source IS NOT NULL THEN
+      RAISE EXCEPTION 'ASC updates require the exact existing response identity' USING ERRCODE = '23514';
+    END IF;
+    IF target.review_resource_id IS NULL THEN
+      RAISE EXCEPTION 'ASC proposals require an exact native review identity' USING ERRCODE = '23514';
+    END IF;
+    SELECT * INTO baseline FROM app_store_connect.review_target t WHERE t.organization_id = revision.organization_id AND t.revision_id = revision.baseline_revision_id;
+      IF NOT FOUND OR ROW(baseline.provider_account_id, baseline.review_resource_id, baseline.response_id) IS DISTINCT FROM ROW(target.provider_account_id, target.review_resource_id, target.response_id) THEN
+        RAISE EXCEPTION 'ASC proposal target differs from its captured response baseline' USING ERRCODE = '23514';
+      END IF;
+  ELSIF content.response_availability = 'present' THEN
+    IF target.response_id IS NULL OR target.native_state_source IS NULL THEN
+      RAISE EXCEPTION 'ASC observed responses require actual identity and a declared native-state source' USING ERRCODE = '23514';
+    END IF;
+    -- Current web/client.ts getAppReviews maps unknown/missing pending flags
+    -- to NONE (6460-6465); NONE is not publication proof. Current API readback
+    -- only trusts PUBLISHED: review-applied-readback.ts compareResponseState.
+    expected_publication := CASE
+      WHEN content.response_hidden IS TRUE THEN 'hidden'
+      WHEN target.native_state_source = 'api_publication' AND target.native_state = 'PUBLISHED' THEN 'published'
+      WHEN target.native_state_source = 'api_publication' AND target.native_state = 'PENDING_PUBLISH' THEN 'pending_publication'
+      WHEN target.native_state_source = 'browser_pending' AND target.native_state IN ('PENDING_CREATE', 'PENDING_UPDATE') THEN 'pending_publication'
+      ELSE 'unreadable'
+    END;
+    IF content.publication_state::text IS DISTINCT FROM expected_publication THEN
+      RAISE EXCEPTION 'ASC native state does not support the claimed neutral publication state' USING ERRCODE = '23514';
+    END IF;
+  ELSIF target.response_id IS NOT NULL OR target.native_state IS NOT NULL OR target.native_state_source IS NOT NULL THEN
+    RAISE EXCEPTION 'Unavailable ASC responses cannot carry invented response facts' USING ERRCODE = '23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION google_play.check_review_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE content review_work.reply_content; target google_play.review_target;
+BEGIN
+  SELECT * INTO content FROM review_work.reply_content c WHERE c.organization_id = revision.organization_id AND c.revision_id = revision.id;
+  IF NOT FOUND OR content.store <> 'android' THEN RAISE EXCEPTION 'Play review target requires Android review content' USING ERRCODE = '23514'; END IF;
+  SELECT * INTO target FROM google_play.review_target t WHERE t.organization_id = revision.organization_id AND t.revision_id = revision.id;
+  IF NOT FOUND OR target.purpose <> revision.purpose THEN RAISE EXCEPTION 'Missing exact Play review target leaf' USING ERRCODE = '23514'; END IF;
+  IF revision.purpose = 'proposal' AND NOT EXISTS (
+    SELECT 1 FROM google_play.review_target b WHERE b.organization_id = revision.organization_id
+    AND b.revision_id = revision.baseline_revision_id AND b.provider_account_id = target.provider_account_id
+  ) THEN RAISE EXCEPTION 'Play proposal target differs from its captured account baseline' USING ERRCODE = '23514'; END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION review_work.check_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE content review_work.reply_content; original actions.revision; original_content review_work.reply_content;
+  baseline actions.revision; baseline_content review_work.reply_content;
+BEGIN
+  SELECT * INTO content FROM review_work.reply_content c WHERE c.organization_id = revision.organization_id AND c.revision_id = revision.id;
+  IF NOT FOUND OR revision.kind <> 'review_reply' OR revision.purpose NOT IN ('proposal', 'baseline', 'observation')
+    OR content.purpose <> revision.purpose THEN
+    RAISE EXCEPTION 'Incomplete review content or unsupported purpose' USING ERRCODE = '23514';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM actions.action a WHERE a.organization_id = revision.organization_id AND a.id = revision.action_id AND a.domain = 'reviews') THEN
+    RAISE EXCEPTION 'Review revisions require their sole content owner' USING ERRCODE = '23514';
+  END IF;
+  IF EXISTS (SELECT 1 FROM actions.revision r JOIN review_work.reply_content c ON c.organization_id = r.organization_id AND c.revision_id = r.id
+    WHERE r.organization_id = revision.organization_id AND r.action_id = revision.action_id
+    AND ROW(c.store, c.provider_app_id, c.provider_review_id) IS DISTINCT FROM ROW(content.store, content.provider_app_id, content.provider_review_id)) THEN
+    RAISE EXCEPTION 'Review identity cannot change between ticket revisions' USING ERRCODE = '23514';
+  END IF;
+
+  IF content.original_ai_revision_id IS NOT NULL THEN
+    -- This is an immutable content-lineage edge. Actual AI authorship still
+    -- requires the generation owner's invocation evidence; the link alone
+    -- never supplies that evidence or grants execution authority.
+    SELECT * INTO original FROM actions.revision r WHERE r.organization_id = revision.organization_id AND r.id = content.original_ai_revision_id;
+    IF NOT FOUND OR original.action_id <> revision.action_id OR original.kind <> 'review_reply' OR original.purpose <> 'proposal'
+      OR NOT original.sealed OR original.revision_number >= revision.revision_number THEN
+      RAISE EXCEPTION 'Original AI reference requires an earlier sealed proposal on this review ticket' USING ERRCODE = '23514';
+    END IF;
+    SELECT * INTO original_content FROM review_work.reply_content c WHERE c.organization_id = revision.organization_id AND c.revision_id = original.id;
+    IF NOT FOUND OR ROW(original_content.store, original_content.provider_app_id, original_content.provider_review_id)
+      IS DISTINCT FROM ROW(content.store, content.provider_app_id, content.provider_review_id) THEN
+      RAISE EXCEPTION 'Original AI content must belong to the exact review identity' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  IF revision.baseline_revision_id IS NOT NULL THEN
+    SELECT * INTO baseline FROM actions.revision r WHERE r.organization_id = revision.organization_id AND r.id = revision.baseline_revision_id;
+    IF NOT FOUND OR baseline.action_id <> revision.action_id OR baseline.kind <> 'review_reply' OR baseline.purpose <> 'baseline' OR NOT baseline.sealed OR baseline.revision_number >= revision.revision_number THEN
+      RAISE EXCEPTION 'Review baseline requires an exact sealed baseline on this ticket' USING ERRCODE = '23514';
+    END IF;
+    SELECT * INTO baseline_content FROM review_work.reply_content c WHERE c.organization_id = revision.organization_id AND c.revision_id = baseline.id;
+    IF NOT FOUND OR ROW(baseline_content.store, baseline_content.provider_app_id, baseline_content.provider_review_id)
+      IS DISTINCT FROM ROW(content.store, content.provider_app_id, content.provider_review_id) THEN
+      RAISE EXCEPTION 'Review baseline identity differs from its proposal' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  IF revision.purpose = 'proposal' THEN
+    IF content.intent = 'send' AND (revision.baseline_revision_id IS NULL OR baseline_content.response_availability IS DISTINCT FROM 'absent') THEN
+      RAISE EXCEPTION 'A reply send requires an exact absent-response baseline' USING ERRCODE = '23514';
+    END IF;
+    IF content.intent = 'update' AND (revision.baseline_revision_id IS NULL OR baseline_content.response_availability IS DISTINCT FROM 'present') THEN
+      RAISE EXCEPTION 'A reply update requires the exact existing-response baseline' USING ERRCODE = '23514';
+    END IF;
+    IF ROW(baseline_content.review_snapshot_availability, baseline_content.review_rating,
+      baseline_content.review_title, baseline_content.review_body, baseline_content.review_nickname,
+      baseline_content.review_storefront, baseline_content.review_app_version, baseline_content.review_created_at,
+      baseline_content.review_modified_at, baseline_content.review_edited)
+      IS DISTINCT FROM ROW(content.review_snapshot_availability, content.review_rating,
+      content.review_title, content.review_body, content.review_nickname,
+      content.review_storefront, content.review_app_version, content.review_created_at,
+      content.review_modified_at, content.review_edited) THEN
+      RAISE EXCEPTION 'Review proposal must retain its exact baseline review snapshot' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+END $$;
+--> statement-breakpoint
+
+-- 0168_damp_tusk.sql
+CREATE TYPE "app_store_connect"."review_credential_kind" AS ENUM('individual', 'team');--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" DROP CONSTRAINT "asc_review_target_identity";--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD COLUMN "source_asset_data_source_id" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD COLUMN "source_connector_id" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD COLUMN "credential_kind" "app_store_connect"."review_credential_kind" NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD COLUMN "credential_key_id" text NOT NULL;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD COLUMN "credential_team_issuer_id" text;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" DROP COLUMN "provider_account_id";--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD CONSTRAINT "asc_review_target_credential_shape" CHECK (("app_store_connect"."review_target"."credential_kind" = 'individual' AND "app_store_connect"."review_target"."credential_team_issuer_id" IS NULL)
+          OR ("app_store_connect"."review_target"."credential_kind" = 'team' AND "app_store_connect"."review_target"."credential_team_issuer_id" IS NOT NULL AND length("app_store_connect"."review_target"."credential_team_issuer_id") > 0));--> statement-breakpoint
+ALTER TABLE "app_store_connect"."review_target" ADD CONSTRAINT "asc_review_target_identity" CHECK (length("app_store_connect"."review_target"."source_asset_data_source_id") > 0 AND length("app_store_connect"."review_target"."source_connector_id") > 0 AND length("app_store_connect"."review_target"."credential_key_id") > 0
+        AND ("app_store_connect"."review_target"."review_resource_id" IS NULL OR length("app_store_connect"."review_target"."review_resource_id") > 0) AND ("app_store_connect"."review_target"."response_id" IS NULL OR length("app_store_connect"."review_target"."response_id") > 0));
+--> statement-breakpoint
+-- Exact captured source provenance; no inferred Apple account identity or live-retention FK.
+CREATE OR REPLACE FUNCTION app_store_connect.check_review_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE content review_work.reply_content; target app_store_connect.review_target;
+  baseline app_store_connect.review_target; expected_publication text;
+BEGIN
+  SELECT * INTO content FROM review_work.reply_content c WHERE c.organization_id = revision.organization_id AND c.revision_id = revision.id;
+  IF NOT FOUND OR content.store <> 'ios' THEN RAISE EXCEPTION 'ASC review target requires iOS review content' USING ERRCODE = '23514'; END IF;
+  SELECT * INTO target FROM app_store_connect.review_target t WHERE t.organization_id = revision.organization_id AND t.revision_id = revision.id;
+  IF NOT FOUND OR target.purpose <> revision.purpose THEN RAISE EXCEPTION 'Missing exact ASC review target leaf' USING ERRCODE = '23514'; END IF;
+  IF revision.purpose = 'proposal' THEN
+    IF (content.intent = 'update') IS DISTINCT FROM (target.response_id IS NOT NULL) OR target.native_state IS NOT NULL OR target.native_state_source IS NOT NULL THEN
+      RAISE EXCEPTION 'ASC updates require the exact existing response identity' USING ERRCODE = '23514';
+    END IF;
+    IF target.review_resource_id IS NULL THEN
+      RAISE EXCEPTION 'ASC proposals require an exact native review identity' USING ERRCODE = '23514';
+    END IF;
+    SELECT * INTO baseline FROM app_store_connect.review_target t WHERE t.organization_id = revision.organization_id AND t.revision_id = revision.baseline_revision_id;
+      IF NOT FOUND OR ROW(baseline.source_asset_data_source_id, baseline.source_connector_id, baseline.credential_kind, baseline.credential_key_id, baseline.credential_team_issuer_id, baseline.review_resource_id, baseline.response_id) IS DISTINCT FROM ROW(target.source_asset_data_source_id, target.source_connector_id, target.credential_kind, target.credential_key_id, target.credential_team_issuer_id, target.review_resource_id, target.response_id) THEN
+        RAISE EXCEPTION 'ASC proposal target differs from its captured response baseline' USING ERRCODE = '23514';
+      END IF;
+  ELSIF content.response_availability = 'present' THEN
+    IF target.response_id IS NULL OR target.native_state_source IS NULL THEN
+      RAISE EXCEPTION 'ASC observed responses require actual identity and a declared native-state source' USING ERRCODE = '23514';
+    END IF;
+    -- Current web/client.ts getAppReviews maps unknown/missing pending flags
+    -- to NONE (6460-6465); NONE is not publication proof. Current API readback
+    -- only trusts PUBLISHED: review-applied-readback.ts compareResponseState.
+    expected_publication := CASE
+      WHEN content.response_hidden IS TRUE THEN 'hidden'
+      WHEN target.native_state_source = 'api_publication' AND target.native_state = 'PUBLISHED' THEN 'published'
+      WHEN target.native_state_source = 'api_publication' AND target.native_state = 'PENDING_PUBLISH' THEN 'pending_publication'
+      WHEN target.native_state_source = 'browser_pending' AND target.native_state IN ('PENDING_CREATE', 'PENDING_UPDATE') THEN 'pending_publication'
+      ELSE 'unreadable'
+    END;
+    IF content.publication_state::text IS DISTINCT FROM expected_publication THEN
+      RAISE EXCEPTION 'ASC native state does not support the claimed neutral publication state' USING ERRCODE = '23514';
+    END IF;
+  ELSIF target.response_id IS NOT NULL OR target.native_state IS NOT NULL OR target.native_state_source IS NOT NULL THEN
+    RAISE EXCEPTION 'Unavailable ASC responses cannot carry invented response facts' USING ERRCODE = '23514';
+  END IF;
+END $$;
