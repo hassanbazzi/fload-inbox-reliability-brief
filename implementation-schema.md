@@ -2,7 +2,7 @@
 
 20 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0163: 21 relations, 353 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0164: 21 relations, 355 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
 
 ## `actions.action`
 
@@ -497,6 +497,8 @@ One admitted interaction, its fence, and its retained outcome. It is not a queue
 | `finished_at` | timestamp with time zone | Yes | — |
 | `result` | attempt_result: acknowledged, known_not_applied, uncertain, generated, discarded, matched, matched_external, mismatch, unreadable | Yes | — |
 | `failure_class` | failure_class: permission, rate_limit, transport, target_changed, provider_rejected, persistence, unsupported_readback, invalid_content, billing | Yes | — |
+| `local_denial_reason` | local_denial_reason: permission_revoked, billing_blocked, approval_changed, source_changed, source_unavailable, worker_draining, cancelled, lease_elapsed | Yes | — |
+| `local_denial_owner` | execution_resolution_owner: client, fload, provider | Yes | — |
 | `non_application_basis` | non_application_basis: provider_rejection, pre_dispatch_failure, provider_proved_non_application | Yes | — |
 | `retry_disposition` | retry_disposition: retryable, permanent | Yes | — |
 | `uncertainty_reason` | uncertainty_reason: transport_lost, claim_expired, invalid_response, accepted_pending | Yes | — |
@@ -551,6 +553,16 @@ attempt_output_revision_scope: (organization_id, output_revision_id) → actions
 attempt_identity_nonempty: length("actions"."execution_attempt"."id") > 0 AND length("actions"."execution_attempt"."execution_id") > 0 AND length("actions"."execution_attempt"."step_id") > 0
 attempt_counters: "actions"."execution_attempt"."number" > 0 AND "actions"."execution_attempt"."claim_generation" > 0 AND ("actions"."execution_attempt"."finalized_claim_generation" IS NULL OR "actions"."execution_attempt"."finalized_claim_generation" > 0) AND ("actions"."execution_attempt"."resource_guard_generation" IS NULL OR "actions"."execution_attempt"."resource_guard_generation" > 0)
 attempt_finish_shape: ("actions"."execution_attempt"."finished_at" IS NULL) = ("actions"."execution_attempt"."result" IS NULL) AND ("actions"."execution_attempt"."finished_at" IS NULL OR "actions"."execution_attempt"."finished_at" >= "actions"."execution_attempt"."started_at")
+attempt_local_denial_shape: 
+        ("actions"."execution_attempt"."local_denial_reason" IS NULL) = ("actions"."execution_attempt"."local_denial_owner" IS NULL)
+        AND ("actions"."execution_attempt"."local_denial_reason" IS NULL OR (
+          "actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."local_denial_owner" IN ('client','fload')
+          AND CASE WHEN "actions"."execution_attempt"."local_denial_reason" IN ('permission_revoked','billing_blocked','approval_changed','source_changed') THEN "actions"."execution_attempt"."local_denial_owner" = 'client'
+            WHEN "actions"."execution_attempt"."local_denial_reason" IN ('worker_draining','cancelled','lease_elapsed') THEN "actions"."execution_attempt"."local_denial_owner" = 'fload' ELSE true END
+          AND (("actions"."execution_attempt"."kind" IN ('write','late_evidence','conflicting_completion') AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied' AND "actions"."execution_attempt"."non_application_basis" IS NOT DISTINCT FROM 'pre_dispatch_failure')
+            OR ("actions"."execution_attempt"."kind" IN ('inspection','readback','late_evidence','conflicting_completion') AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'unreadable' AND "actions"."execution_attempt"."unreadable_reason" IS NOT DISTINCT FROM 'cancelled'))
+          AND num_nonnulls("actions"."execution_attempt"."terminal_outcome","actions"."execution_attempt"."semantic_fingerprint","actions"."execution_attempt"."observation_revision_id","actions"."execution_attempt"."output_kind") = 0
+        ))
 attempt_reason_shape: ("actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied') = ("actions"."execution_attempt"."non_application_basis" IS NOT NULL) AND ("actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied') = ("actions"."execution_attempt"."retry_disposition" IS NOT NULL) AND ("actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'uncertain') = ("actions"."execution_attempt"."uncertainty_reason" IS NOT NULL) AND ("actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'unreadable') = ("actions"."execution_attempt"."unreadable_reason" IS NOT NULL)
 attempt_fingerprint_shape: ("actions"."execution_attempt"."semantic_fingerprint" IS NULL) = ("actions"."execution_attempt"."fingerprint_version" IS NULL) AND ("actions"."execution_attempt"."semantic_fingerprint" IS NULL OR ("actions"."execution_attempt"."semantic_fingerprint" ~ '^[0-9a-f]{64}$' AND "actions"."execution_attempt"."fingerprint_version" > 0))
 attempt_observation_shape: num_nonnulls("actions"."execution_attempt"."observation_revision_id", "actions"."execution_attempt"."comparison_version", "actions"."execution_attempt"."observation_surface", "actions"."execution_attempt"."observation_completeness") IN (0,4) AND ("actions"."execution_attempt"."comparison_version" IS NULL OR "actions"."execution_attempt"."comparison_version" > 0)
@@ -559,9 +571,9 @@ attempt_cycle_shape: ("actions"."execution_attempt"."kind" IN ('readback','inspe
 attempt_inspection_shape: "actions"."execution_attempt"."kind" IN ('late_evidence','conflicting_completion') OR (
     ("actions"."execution_attempt"."kind" = 'inspection') = ("actions"."execution_attempt"."inspection_purpose" IS NOT NULL)
     AND ("actions"."execution_attempt"."inspection_purpose" IS NOT DISTINCT FROM 'prewrite') = ("actions"."execution_attempt"."planned_write_step_id" IS NOT NULL)
-    AND ("actions"."execution_attempt"."kind" = 'write' OR "actions"."execution_attempt"."inspection_purpose" IS NOT DISTINCT FROM 'prewrite') = ("actions"."execution_attempt"."resource_guard_generation" IS NOT NULL)
+    AND ("actions"."execution_attempt"."kind" = 'readback' OR ("actions"."execution_attempt"."kind" = 'write' OR "actions"."execution_attempt"."inspection_purpose" IS NOT DISTINCT FROM 'prewrite') = ("actions"."execution_attempt"."resource_guard_generation" IS NOT NULL))
     AND ("actions"."execution_attempt"."prewrite_attempt_id" IS NULL OR "actions"."execution_attempt"."kind" = 'write'))
-attempt_capture_shape: ("actions"."execution_attempt"."kind" = 'conflicting_completion') = ("actions"."execution_attempt"."capture_digest" IS NOT NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL) = ("actions"."execution_attempt"."capture_digest_version" IS NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL OR ("actions"."execution_attempt"."capture_digest" ~ '^[0-9a-f]{64}$' AND "actions"."execution_attempt"."capture_digest_version" IN (1,2)))
+attempt_capture_shape: ("actions"."execution_attempt"."kind" = 'conflicting_completion') = ("actions"."execution_attempt"."capture_digest" IS NOT NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL) = ("actions"."execution_attempt"."capture_digest_version" IS NULL) AND ("actions"."execution_attempt"."capture_digest" IS NULL OR ("actions"."execution_attempt"."capture_digest" ~ '^[0-9a-f]{64}$' AND "actions"."execution_attempt"."capture_digest_version" IN (1,2,3)))
 attempt_fence_shape: CASE WHEN "actions"."execution_attempt"."kind" IN ('late_evidence','conflicting_completion') THEN "actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."finalized_claim_generation" IS NULL AND "actions"."execution_attempt"."finalized_claim_token" IS NULL ELSE ("actions"."execution_attempt"."finished_at" IS NOT NULL) = ("actions"."execution_attempt"."finalized_claim_generation" IS NOT NULL) AND ("actions"."execution_attempt"."finalized_claim_generation" IS NULL) = ("actions"."execution_attempt"."finalized_claim_token" IS NULL) END
 attempt_evidence_command_shape: CASE WHEN "actions"."execution_attempt"."kind" IN ('late_evidence','conflicting_completion','manual_observation') THEN "actions"."execution_attempt"."evidence_command_id" IS NOT NULL AND "actions"."execution_attempt"."finished_at" IS NOT NULL WHEN "actions"."execution_attempt"."kind" = 'inspection' AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'unreadable' AND "actions"."execution_attempt"."unreadable_reason" IS NOT DISTINCT FROM 'cancelled' THEN "actions"."execution_attempt"."evidence_command_id" IS NOT NULL AND "actions"."execution_attempt"."finished_at" IS NOT NULL ELSE "actions"."execution_attempt"."evidence_command_id" IS NULL END
 attempt_unfinished_empty: "actions"."execution_attempt"."finished_at" IS NOT NULL OR num_nonnulls("actions"."execution_attempt"."failure_class","actions"."execution_attempt"."terminal_outcome","actions"."execution_attempt"."semantic_fingerprint","actions"."execution_attempt"."fingerprint_version","actions"."execution_attempt"."observation_revision_id","actions"."execution_attempt"."output_kind") = 0
