@@ -2815,3 +2815,48 @@ BEGIN
   PERFORM composition.check_execution_attempt_owner(captured);
   RETURN NULL;
 END $$;
+
+-- 0159_chunky_maggott.sql
+-- Generated index definition: CREATE INDEX "aso_experiment_applied_sweep_idx"
+-- ON "aso_experiment" USING btree ("createdAt","id" COLLATE "C")
+-- WHERE "aso_experiment"."status" = 'applied';
+-- A populated table must be prepared CONCURRENTLY outside the migration's
+-- transaction. See docs/aso-applied-sweep-index-preparation.md.
+DO $applied_sweep_index$
+DECLARE
+  index_id oid;
+  previous_lock_timeout text := current_setting('lock_timeout');
+BEGIN
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('fload:aso-applied-sweep-index', 0)) THEN
+    RAISE EXCEPTION 'Applied sweep index preparation or migration is already running';
+  END IF;
+  PERFORM set_config('lock_timeout', '5s', true);
+  -- Stabilize the index definition while allowing ordinary row writes when
+  -- an operator already prepared it. Only a missing index needs the stronger
+  -- lock below, to prove emptiness without racing an insert.
+  LOCK TABLE public.aso_experiment IN SHARE UPDATE EXCLUSIVE MODE;
+  index_id := to_regclass('public.aso_experiment_applied_sweep_idx');
+  IF index_id IS NULL THEN
+    LOCK TABLE public.aso_experiment IN SHARE MODE;
+    -- Physical emptiness under this lock is sufficient. A previously populated
+    -- heap remains conservative: do not trust row estimates or scan its rows.
+    IF pg_relation_size('public.aso_experiment'::regclass) <> 0 THEN
+      RAISE EXCEPTION 'Prepare public.aso_experiment_applied_sweep_idx before migration: run packages/database/scripts/prepare-aso-applied-sweep-index.ts --database-name NAME --execute with the explicitly selected DATABASE_URL';
+    END IF;
+    CREATE INDEX aso_experiment_applied_sweep_idx ON public.aso_experiment USING btree ("createdAt", id COLLATE "C") WHERE status='applied';
+    index_id := 'public.aso_experiment_applied_sweep_idx'::regclass;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid
+    WHERE i.indexrelid=index_id AND i.indrelid='public.aso_experiment'::regclass AND c.relkind='i'
+      AND NOT i.indisunique AND i.indisvalid AND i.indisready AND i.indislive AND i.indimmediate
+      AND NOT i.indisprimary AND NOT i.indisexclusion AND NOT i.indnullsnotdistinct
+      AND i.indnkeyatts=2 AND i.indnatts=2 AND i.indpred IS NOT NULL AND i.indexprs IS NULL
+      AND pg_get_indexdef(i.indexrelid,0,false)='CREATE INDEX aso_experiment_applied_sweep_idx ON public.aso_experiment USING btree ("createdAt", id COLLATE "C") WHERE (status = ''applied''::text)'
+      AND NOT EXISTS(SELECT 1 FROM pg_constraint k WHERE k.conindid=i.indexrelid)
+  ) THEN
+    RAISE EXCEPTION 'public.aso_experiment_applied_sweep_idx has a mismatched definition, constraint owner, or invalid build state; operator inspection is required';
+  END IF;
+  PERFORM set_config('lock_timeout', previous_lock_timeout, true);
+END;
+$applied_sweep_index$;
