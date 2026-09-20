@@ -4797,3 +4797,888 @@ BEGIN
   PERFORM set_config('lock_timeout',current_setting('fload.retry_previous_lock_timeout'),true);
   PERFORM set_config('statement_timeout',current_setting('fload.retry_previous_statement_timeout'),true);
 END $retry_maintenance$;
+
+-- 0170_attention_history_conservation.sql
+CREATE SCHEMA "history";
+--> statement-breakpoint
+CREATE TYPE "agent_work"."attention_import_priority" AS ENUM('high', 'medium', 'low');--> statement-breakpoint
+CREATE TYPE "agent_work"."attention_import_status" AS ENUM('pending_approval', 'rejected', 'expired');--> statement-breakpoint
+CREATE TYPE "history"."operator_kind" AS ENUM('user', 'system');--> statement-breakpoint
+CREATE TYPE "history"."overlay_resolution" AS ENUM('personal_only', 'pending_review');--> statement-breakpoint
+CREATE TYPE "history"."overlay_status" AS ENUM('read', 'unread', 'snoozed', 'dismissed', 'archived');--> statement-breakpoint
+CREATE TYPE "history"."import_run_outcome" AS ENUM('completed', 'aborted');--> statement-breakpoint
+CREATE TYPE "history"."source_disposition" AS ENUM('imported_as_work', 'declined_history', 'terminal_history', 'personal_state');--> statement-breakpoint
+CREATE TYPE "history"."source_kind" AS ENUM('pending_action', 'inbox_item_state');--> statement-breakpoint
+CREATE TYPE "history"."source_scope" AS ENUM('asset', 'organization');--> statement-breakpoint
+CREATE TABLE "agent_work"."attention_source_claim" (
+	"organization_id" text NOT NULL,
+	"record_id" text NOT NULL,
+	"source_revision_id" text NOT NULL,
+	"orchestrator_run_source_id" text NOT NULL,
+	"source_agent_run_id" text,
+	"priority" "agent_work"."attention_import_priority" NOT NULL,
+	"status_at_import" "agent_work"."attention_import_status" NOT NULL,
+	"rejected_by_user_id" text,
+	"rejected_at" timestamp with time zone,
+	"rejected_at_provenance_id" text,
+	"rejected_reason" text,
+	"deleted_by_user_id" text,
+	"deleted_at" timestamp with time zone,
+	"failure_reason" text,
+	CONSTRAINT "attention_source_claim_organization_id_record_id_pk" PRIMARY KEY("organization_id","record_id"),
+	CONSTRAINT "attention_claim_revision_owner" UNIQUE("organization_id","source_revision_id"),
+	CONSTRAINT "attention_claim_rejection_shape" CHECK ((("agent_work"."attention_source_claim"."status_at_import"='rejected' AND "agent_work"."attention_source_claim"."rejected_at" IS NOT NULL AND "agent_work"."attention_source_claim"."rejected_at_provenance_id" IS NOT NULL) OR ("agent_work"."attention_source_claim"."status_at_import"<>'rejected' AND "agent_work"."attention_source_claim"."rejected_at" IS NULL AND "agent_work"."attention_source_claim"."rejected_at_provenance_id" IS NULL AND "agent_work"."attention_source_claim"."rejected_by_user_id" IS NULL AND "agent_work"."attention_source_claim"."rejected_reason" IS NULL))),
+	CONSTRAINT "attention_claim_deletion_shape" CHECK ("agent_work"."attention_source_claim"."deleted_by_user_id" IS NULL OR "agent_work"."attention_source_claim"."deleted_at" IS NOT NULL),
+	CONSTRAINT "attention_claim_instant_bounds" CHECK (("agent_work"."attention_source_claim"."rejected_at" IS NULL OR "agent_work"."attention_source_claim"."rejected_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("agent_work"."attention_source_claim"."deleted_at" IS NULL OR "agent_work"."attention_source_claim"."deleted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz))
+);
+--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_source_claim" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE TABLE "history"."component_command" (
+	"organization_id" text NOT NULL,
+	"component_id" text NOT NULL,
+	"ordinal" integer NOT NULL,
+	"command_id" text NOT NULL,
+	CONSTRAINT "component_command_organization_id_component_id_ordinal_pk" PRIMARY KEY("organization_id","component_id","ordinal"),
+	CONSTRAINT "import_command_owner" UNIQUE("organization_id","command_id"),
+	CONSTRAINT "component_command_ordinal" CHECK ("history"."component_command"."ordinal">=0)
+);
+--> statement-breakpoint
+ALTER TABLE "history"."component_command" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE TABLE "history"."import_component" (
+	"organization_id" text NOT NULL,
+	"id" text NOT NULL,
+	"import_run_id" text NOT NULL,
+	"component_key" text NOT NULL,
+	"component_fingerprint" text NOT NULL,
+	"mapping_digest" text NOT NULL,
+	"fingerprint_version" integer NOT NULL,
+	"member_count" integer NOT NULL,
+	"imported_at" timestamp with time zone NOT NULL,
+	"redacted_at" timestamp with time zone,
+	CONSTRAINT "import_component_organization_id_id_pk" PRIMARY KEY("organization_id","id"),
+	CONSTRAINT "import_component_identity" UNIQUE("organization_id","component_key"),
+	CONSTRAINT "import_component_digests" CHECK ("history"."import_component"."component_key" ~ '^[a-f0-9]{64}$' AND "history"."import_component"."component_fingerprint" ~ '^[a-f0-9]{64}$' AND "history"."import_component"."mapping_digest" ~ '^[a-f0-9]{64}$'),
+	CONSTRAINT "import_component_version_count" CHECK ("history"."import_component"."fingerprint_version"=1 AND "history"."import_component"."member_count">0),
+	CONSTRAINT "import_component_instant_bounds" CHECK (("history"."import_component"."imported_at" IS NULL OR "history"."import_component"."imported_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("history"."import_component"."redacted_at" IS NULL OR "history"."import_component"."redacted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)),
+	CONSTRAINT "import_component_redaction_time" CHECK ("history"."import_component"."redacted_at" IS NULL OR "history"."import_component"."redacted_at">="history"."import_component"."imported_at")
+);
+--> statement-breakpoint
+ALTER TABLE "history"."import_component" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE TABLE "history"."import_run" (
+	"organization_id" text NOT NULL,
+	"id" text NOT NULL,
+	"importer_version" integer NOT NULL,
+	"decoder_version" integer NOT NULL,
+	"source_pin" text NOT NULL,
+	"census_id" text NOT NULL,
+	"operator_kind" "history"."operator_kind" NOT NULL,
+	"operator_user_id" text,
+	"operator_subject_snapshot" text,
+	"operator_name_snapshot" text,
+	"started_at" timestamp with time zone NOT NULL,
+	"finished_at" timestamp with time zone,
+	"outcome" "history"."import_run_outcome",
+	CONSTRAINT "import_run_organization_id_id_pk" PRIMARY KEY("organization_id","id"),
+	CONSTRAINT "import_run_instant_bounds" CHECK (("history"."import_run"."started_at" IS NULL OR "history"."import_run"."started_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("history"."import_run"."finished_at" IS NULL OR "history"."import_run"."finished_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)),
+	CONSTRAINT "import_run_versions_positive" CHECK ("history"."import_run"."importer_version" > 0 AND "history"."import_run"."decoder_version" > 0),
+	CONSTRAINT "import_run_source_pin" CHECK ("history"."import_run"."source_pin" ~ '^[a-f0-9]{40}$'),
+	CONSTRAINT "import_run_finality" CHECK (("history"."import_run"."finished_at" IS NULL) = ("history"."import_run"."outcome" IS NULL) AND ("history"."import_run"."finished_at" IS NULL OR "history"."import_run"."finished_at" >= "history"."import_run"."started_at")),
+	CONSTRAINT "import_run_system_actor" CHECK ("history"."import_run"."operator_kind" <> 'system' OR "history"."import_run"."operator_user_id" IS NULL)
+);
+--> statement-breakpoint
+ALTER TABLE "history"."import_run" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE TABLE "history"."overlay_claim" (
+	"organization_id" text NOT NULL,
+	"record_id" text NOT NULL,
+	"target_source_id" text NOT NULL,
+	"overlay_status" "history"."overlay_status" NOT NULL,
+	"snoozed_until" timestamp with time zone,
+	"snoozed_until_provenance_id" text,
+	"note" text,
+	"resolution" "history"."overlay_resolution" NOT NULL,
+	CONSTRAINT "overlay_claim_organization_id_record_id_pk" PRIMARY KEY("organization_id","record_id"),
+	CONSTRAINT "overlay_claim_snooze_provenance" CHECK (("history"."overlay_claim"."snoozed_until" IS NULL)=("history"."overlay_claim"."snoozed_until_provenance_id" IS NULL)),
+	CONSTRAINT "overlay_claim_resolution" CHECK (("history"."overlay_claim"."overlay_status" IN ('read','unread'))=("history"."overlay_claim"."resolution"='personal_only')),
+	CONSTRAINT "overlay_claim_instant_bounds" CHECK (("history"."overlay_claim"."snoozed_until" IS NULL OR "history"."overlay_claim"."snoozed_until" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz))
+);
+--> statement-breakpoint
+ALTER TABLE "history"."overlay_claim" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE TABLE "history"."source_record" (
+	"organization_id" text NOT NULL,
+	"id" text NOT NULL,
+	"component_id" text NOT NULL,
+	"member_ordinal" integer NOT NULL,
+	"source_kind" "history"."source_kind" NOT NULL,
+	"source_id" text NOT NULL,
+	"source_fingerprint" text NOT NULL,
+	"fingerprint_version" integer NOT NULL,
+	"asset_id" text,
+	"scope" "history"."source_scope" NOT NULL,
+	"action_id" text NOT NULL,
+	"disposition" "history"."source_disposition" NOT NULL,
+	"source_created_at" timestamp with time zone NOT NULL,
+	"source_updated_at" timestamp with time zone NOT NULL,
+	"created_at_provenance_id" text NOT NULL,
+	"updated_at_provenance_id" text NOT NULL,
+	"personal_user_id" text,
+	CONSTRAINT "source_record_organization_id_id_pk" PRIMARY KEY("organization_id","id"),
+	CONSTRAINT "import_source_identity" UNIQUE("organization_id","source_kind","source_id"),
+	CONSTRAINT "import_source_member_ordinal" UNIQUE("organization_id","component_id","member_ordinal"),
+	CONSTRAINT "import_source_ordinal_nonnegative" CHECK ("history"."source_record"."member_ordinal">=0),
+	CONSTRAINT "import_source_asset_shape" CHECK (("history"."source_record"."scope"='asset')=("history"."source_record"."asset_id" IS NOT NULL)),
+	CONSTRAINT "import_source_personal_shape" CHECK (("history"."source_record"."source_kind"='inbox_item_state')=("history"."source_record"."personal_user_id" IS NOT NULL) AND ("history"."source_record"."source_kind"='inbox_item_state')=("history"."source_record"."disposition"='personal_state')),
+	CONSTRAINT "import_source_fingerprint_version" CHECK ("history"."source_record"."fingerprint_version"=1),
+	CONSTRAINT "import_source_fingerprint" CHECK ("history"."source_record"."source_fingerprint" ~ '^[a-f0-9]{64}$'),
+	CONSTRAINT "import_source_instant_bounds" CHECK (("history"."source_record"."source_created_at" IS NULL OR "history"."source_record"."source_created_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("history"."source_record"."source_updated_at" IS NULL OR "history"."source_record"."source_updated_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz))
+);
+--> statement-breakpoint
+ALTER TABLE "history"."source_record" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_advisory" DROP CONSTRAINT "attention_proposal_only";--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_source_claim" ADD CONSTRAINT "attention_source_claim_rejected_by_user_id_user_id_fk" FOREIGN KEY ("rejected_by_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_source_claim" ADD CONSTRAINT "attention_source_claim_deleted_by_user_id_user_id_fk" FOREIGN KEY ("deleted_by_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_source_claim" ADD CONSTRAINT "attention_claim_source_scope" FOREIGN KEY ("organization_id","record_id") REFERENCES "history"."source_record"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_source_claim" ADD CONSTRAINT "attention_claim_revision_scope" FOREIGN KEY ("organization_id","source_revision_id") REFERENCES "actions"."revision"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."component_command" ADD CONSTRAINT "component_command_component_scope" FOREIGN KEY ("organization_id","component_id") REFERENCES "history"."import_component"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."component_command" ADD CONSTRAINT "component_command_command_scope" FOREIGN KEY ("organization_id","command_id") REFERENCES "actions"."command"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."import_component" ADD CONSTRAINT "import_component_run_scope" FOREIGN KEY ("organization_id","import_run_id") REFERENCES "history"."import_run"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."import_run" ADD CONSTRAINT "import_run_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."import_run" ADD CONSTRAINT "import_run_operator_user_id_user_id_fk" FOREIGN KEY ("operator_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."overlay_claim" ADD CONSTRAINT "overlay_claim_source_scope" FOREIGN KEY ("organization_id","record_id") REFERENCES "history"."source_record"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."source_record" ADD CONSTRAINT "source_record_personal_user_id_user_id_fk" FOREIGN KEY ("personal_user_id") REFERENCES "public"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."source_record" ADD CONSTRAINT "import_source_component_scope" FOREIGN KEY ("organization_id","component_id") REFERENCES "history"."import_component"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."source_record" ADD CONSTRAINT "import_source_action_scope" FOREIGN KEY ("organization_id","action_id") REFERENCES "actions"."action"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "history"."source_record" ADD CONSTRAINT "import_source_asset_scope" FOREIGN KEY ("organization_id","asset_id") REFERENCES "public"."asset"("organizationId","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "import_source_component_lookup" ON "history"."source_record" USING btree ("organization_id","component_id");--> statement-breakpoint
+ALTER TABLE "agent_work"."attention_advisory" ADD CONSTRAINT "attention_supported_purpose" CHECK ("agent_work"."attention_advisory"."purpose" IN ('proposal','historical'));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "agent_work"."attention_source_claim" AS PERMISSIVE FOR ALL TO public USING ("agent_work"."attention_source_claim"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("agent_work"."attention_source_claim"."organization_id" = current_setting('fload.organization_id', true));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "history"."component_command" AS PERMISSIVE FOR ALL TO public USING ("history"."component_command"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("history"."component_command"."organization_id" = current_setting('fload.organization_id', true));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "history"."import_component" AS PERMISSIVE FOR ALL TO public USING ("history"."import_component"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("history"."import_component"."organization_id" = current_setting('fload.organization_id', true));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "history"."import_run" AS PERMISSIVE FOR ALL TO public USING ("history"."import_run"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("history"."import_run"."organization_id" = current_setting('fload.organization_id', true));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "history"."overlay_claim" AS PERMISSIVE FOR ALL TO public USING ("history"."overlay_claim"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("history"."overlay_claim"."organization_id" = current_setting('fload.organization_id', true));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "history"."source_record" AS PERMISSIVE FOR ALL TO public USING ("history"."source_record"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("history"."source_record"."organization_id" = current_setting('fload.organization_id', true));
+--> statement-breakpoint
+-- FLO-1355 first attention conservation owner: No source fence, apply route, or erasure authority.
+-- Component completeness is linear once per marker. Member slots are immutable,
+-- unique and bounded, so a later transaction cannot append a new member.
+CREATE FUNCTION history.guard_import_fact() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'Import conservation facts are immutable; central erasure owner is not installed' USING ERRCODE='23514';
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION history.guard_import_run() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP='DELETE' THEN
+    RAISE EXCEPTION 'Import actor erasure requires the central erasure owner' USING ERRCODE='23514';
+  ELSIF TG_OP='INSERT' THEN
+    IF NEW.operator_subject_snapshot IS NULL OR NEW.operator_subject_snapshot='' OR
+      (NEW.operator_kind='user' AND NEW.operator_user_id IS NULL) OR
+      NEW.finished_at IS NOT NULL OR NEW.outcome IS NOT NULL THEN
+      RAISE EXCEPTION 'Import invocation requires its admitted operator and starts unfinished' USING ERRCODE='23514';
+    END IF;
+  ELSIF OLD.finished_at IS NOT NULL OR NEW.finished_at IS NULL OR
+    ROW(NEW.organization_id,NEW.id,NEW.importer_version,NEW.decoder_version,NEW.source_pin,NEW.census_id,
+      NEW.operator_kind,NEW.operator_user_id,NEW.operator_subject_snapshot,NEW.operator_name_snapshot,NEW.started_at)
+    IS DISTINCT FROM ROW(OLD.organization_id,OLD.id,OLD.importer_version,OLD.decoder_version,OLD.source_pin,OLD.census_id,
+      OLD.operator_kind,OLD.operator_user_id,OLD.operator_subject_snapshot,OLD.operator_name_snapshot,OLD.started_at) THEN
+    RAISE EXCEPTION 'Import invocation attribution is immutable and may finish once' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION history.guard_component_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE invocation history.import_run;
+BEGIN
+  SELECT * INTO invocation FROM history.import_run r WHERE r.organization_id=NEW.organization_id AND r.id=NEW.import_run_id FOR SHARE;
+  IF NOT FOUND OR invocation.finished_at IS NOT NULL THEN
+    RAISE EXCEPTION 'A new component requires its unfinished admitted invocation' USING ERRCODE='23514';
+  END IF;
+  IF NEW.redacted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Import cannot manufacture prior erasure' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION history.check_source_slot() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE component history.import_component;
+BEGIN
+  SELECT * INTO component FROM history.import_component c
+    WHERE c.organization_id=NEW.organization_id AND c.id=NEW.component_id FOR KEY SHARE;
+  IF NOT FOUND OR component.redacted_at IS NOT NULL OR NEW.member_ordinal>=component.member_count THEN
+    RAISE EXCEPTION 'Import source must occupy an original non-erased component slot' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION history.check_command_slot() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE component history.import_component; expected_count integer;
+BEGIN
+  SELECT * INTO component FROM history.import_component c
+    WHERE c.organization_id=NEW.organization_id AND c.id=NEW.component_id FOR KEY SHARE;
+  IF NOT FOUND OR component.redacted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Import command requires its original non-erased component' USING ERRCODE='23514';
+  END IF;
+  SELECT CASE WHEN a.status_at_import='rejected' THEN 2 ELSE 1 END INTO expected_count
+    FROM history.source_record s JOIN agent_work.attention_source_claim a
+      ON a.organization_id=s.organization_id AND a.record_id=s.id
+    WHERE s.organization_id=NEW.organization_id AND s.component_id=NEW.component_id AND s.source_kind='pending_action';
+  IF expected_count IS NULL OR NEW.ordinal>=expected_count THEN
+    RAISE EXCEPTION 'Command ordinal is outside the original attention import plan' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION agent_work.check_attention_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  IF revision.kind<>'advisory' OR revision.purpose NOT IN ('proposal','historical') OR
+    NOT EXISTS (SELECT 1 FROM agent_work.attention_advisory a
+      WHERE a.organization_id=revision.organization_id AND a.revision_id=revision.id AND a.purpose=revision.purpose) OR
+    EXISTS (SELECT 1 FROM actions.membership m WHERE m.organization_id=revision.organization_id AND m.parent_revision_id=revision.id) THEN
+    RAISE EXCEPTION 'Incomplete attention advisory content' USING ERRCODE='23514';
+  END IF;
+  IF revision.purpose='historical' AND NOT EXISTS (
+    SELECT 1 FROM agent_work.attention_source_claim c JOIN history.source_record s
+      ON s.organization_id=c.organization_id AND s.id=c.record_id
+    WHERE c.organization_id=revision.organization_id AND c.source_revision_id=revision.id
+      AND s.source_kind='pending_action' AND s.action_id=revision.action_id
+      AND (c.status_at_import IN ('rejected','expired') OR c.deleted_at IS NOT NULL)
+  ) THEN
+    RAISE EXCEPTION 'Historical attention content requires its exact non-authorizing source claim' USING ERRCODE='23514';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION agent_work.check_attention_source_admission() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.purpose='historical' THEN
+    IF NOT EXISTS (SELECT 1 FROM agent_work.attention_source_claim c
+      WHERE c.organization_id=NEW.organization_id AND c.source_revision_id=NEW.revision_id) THEN
+      RAISE EXCEPTION 'Historical attention requires its retained source owner' USING ERRCODE='23514';
+    END IF;
+  ELSIF EXISTS (
+    SELECT 1 FROM agent_work.attention_source_claim c
+    JOIN history.source_record s ON s.organization_id=c.organization_id AND s.id=c.record_id
+    JOIN actions.revision r ON r.organization_id=c.organization_id AND r.id=c.source_revision_id AND r.action_id=s.action_id
+    JOIN actions.action a ON a.organization_id=s.organization_id AND a.id=s.action_id
+    WHERE c.organization_id=NEW.organization_id AND c.source_revision_id=NEW.revision_id
+      AND c.status_at_import='pending_approval' AND c.deleted_at IS NULL
+      AND s.source_kind='pending_action' AND s.disposition='imported_as_work'
+      AND r.kind='advisory' AND r.purpose='proposal' AND r.revision_number=1 AND NOT r.sealed
+      AND a.record_kind='work' AND a.current_revision_id=r.id AND a.version=1
+  ) THEN
+    -- The deferred source/component FK and marker check prove complete atomic
+    -- conservation. This exact first revision never grants current effect authority.
+    RETURN NEW;
+  ELSE
+    PERFORM 1 FROM public.agent a WHERE a.id=NEW.agent_source_id
+      AND a."organizationId"=NEW.organization_id AND a.type=NEW.agent_type::text FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Attention content requires its exact live agent and tenant at admission' USING ERRCODE='23514'; END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION history.check_attention_component() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE invocation history.import_run; parent history.source_record; claim agent_work.attention_source_claim;
+  ticket actions.action; revision actions.revision; expected_kind actions.record_kind;
+  expected_disposition history.source_disposition; expected_commands integer;
+BEGIN
+  SELECT * INTO invocation FROM history.import_run r WHERE r.organization_id=NEW.organization_id AND r.id=NEW.import_run_id;
+  IF NOT FOUND OR invocation.decoder_version<>1 OR invocation.importer_version<>1 OR NEW.imported_at<invocation.started_at
+    OR (invocation.finished_at IS NOT NULL AND NEW.imported_at>invocation.finished_at) THEN
+    RAISE EXCEPTION 'Attention import requires its exact supported invocation' USING ERRCODE='23514';
+  END IF;
+  IF (SELECT count(*) FROM history.source_record s WHERE s.organization_id=NEW.organization_id AND s.component_id=NEW.id)<>NEW.member_count
+    OR (SELECT count(*) FROM history.source_record s WHERE s.organization_id=NEW.organization_id AND s.component_id=NEW.id AND s.source_kind='pending_action')<>1 THEN
+    RAISE EXCEPTION 'Attention import must conserve one pending source and every declared member' USING ERRCODE='23514';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM (
+      SELECT s.member_ordinal, row_number() OVER (ORDER BY s.source_kind::text COLLATE "C",s.source_id COLLATE "C")-1 expected_ordinal
+      FROM history.source_record s WHERE s.organization_id=NEW.organization_id AND s.component_id=NEW.id
+    ) ordered WHERE ordered.member_ordinal<>ordered.expected_ordinal
+  ) THEN RAISE EXCEPTION 'Import membership ordinal must preserve canonical source order' USING ERRCODE='23514'; END IF;
+  SELECT * INTO parent FROM history.source_record s WHERE s.organization_id=NEW.organization_id AND s.component_id=NEW.id AND s.source_kind='pending_action';
+  SELECT * INTO claim FROM agent_work.attention_source_claim c WHERE c.organization_id=parent.organization_id AND c.record_id=parent.id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Pending source lacks its typed attention claim' USING ERRCODE='23514'; END IF;
+  SELECT * INTO ticket FROM actions.action a WHERE a.organization_id=parent.organization_id AND a.id=parent.action_id;
+  SELECT * INTO revision FROM actions.revision r WHERE r.organization_id=parent.organization_id AND r.id=claim.source_revision_id;
+  expected_kind:=CASE WHEN claim.deleted_at IS NOT NULL THEN 'historical_deleted'::actions.record_kind
+    WHEN claim.status_at_import='pending_approval' THEN 'work'::actions.record_kind ELSE 'historical'::actions.record_kind END;
+  expected_disposition:=CASE WHEN claim.status_at_import='rejected' THEN 'declined_history'::history.source_disposition
+    WHEN expected_kind='work' THEN 'imported_as_work'::history.source_disposition ELSE 'terminal_history'::history.source_disposition END;
+  expected_commands:=CASE WHEN claim.status_at_import='rejected' THEN 2 ELSE 1 END;
+  IF ticket.id IS NULL OR revision.id IS NULL OR ticket.domain<>'advisory' OR ticket.asset_id IS DISTINCT FROM parent.asset_id
+    OR ticket.created_at<>NEW.imported_at OR ticket.parent_action_id IS NOT NULL OR ticket.record_kind<>expected_kind OR ticket.version<>expected_commands
+    OR ticket.current_revision_id<>revision.id OR revision.action_id<>ticket.id OR revision.kind<>'advisory' OR NOT revision.sealed
+    OR revision.rationale IS NULL OR revision.revision_number<>1 OR revision.baseline_revision_id IS NOT NULL
+    OR revision.purpose<>(CASE WHEN expected_kind='work' THEN 'proposal'::actions.revision_purpose ELSE 'historical'::actions.revision_purpose END)
+    OR parent.disposition<>expected_disposition OR ticket.current_approval_id IS NOT NULL
+    OR ticket.priority<>(CASE claim.priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END)
+    OR ticket.decision<>(CASE WHEN claim.status_at_import='rejected' THEN 'declined'::actions.decision ELSE 'open'::actions.decision END)
+    OR ticket.snoozed_until IS NOT NULL OR ticket.scheduled_for IS NOT NULL OR ticket.archived_at IS NOT NULL
+    OR ticket.owner_user_id IS NOT NULL OR ticket.successor_action_id IS NOT NULL THEN
+    RAISE EXCEPTION 'Attention import head differs from its exact source disposition' USING ERRCODE='23514';
+  END IF;
+  IF EXISTS (SELECT 1 FROM actions.approval a WHERE a.organization_id=parent.organization_id AND a.action_id=parent.action_id)
+    OR NOT EXISTS (SELECT 1 FROM actions.alias a WHERE a.organization_id=parent.organization_id AND a.namespace='pending_action' AND a.old_id=parent.source_id AND a.action_id=parent.action_id AND a.historical_membership_known) THEN
+    RAISE EXCEPTION 'Attention conservation needs the exact source alias without any approval' USING ERRCODE='23514';
+  END IF;
+  IF EXISTS (SELECT 1 FROM history.source_record s
+    LEFT JOIN history.overlay_claim o ON o.organization_id=s.organization_id AND o.record_id=s.id
+    LEFT JOIN agent_work.attention_source_claim a ON a.organization_id=s.organization_id AND a.record_id=s.id
+    WHERE s.organization_id=NEW.organization_id AND s.component_id=NEW.id AND (
+      s.asset_id IS DISTINCT FROM parent.asset_id OR s.scope<>parent.scope OR s.action_id<>parent.action_id OR
+      (s.source_kind='pending_action' AND (o.record_id IS NOT NULL OR a.record_id IS NULL)) OR
+      (s.source_kind='inbox_item_state' AND (a.record_id IS NOT NULL OR o.record_id IS NULL OR o.target_source_id<>parent.source_id))
+    )) THEN RAISE EXCEPTION 'Import members require exact same-component typed leaves and scope' USING ERRCODE='23514'; END IF;
+  IF (SELECT count(*) FROM history.component_command c WHERE c.organization_id=NEW.organization_id AND c.component_id=NEW.id)<>expected_commands THEN
+    RAISE EXCEPTION 'Attention import requires its complete attributable command plan' USING ERRCODE='23514';
+  END IF;
+  IF EXISTS (SELECT 1 FROM history.component_command link
+    JOIN actions.command c ON c.organization_id=link.organization_id AND c.id=link.command_id
+    LEFT JOIN actions.command_target t ON t.organization_id=c.organization_id AND t.command_id=c.id AND t.action_id=parent.action_id
+    WHERE link.organization_id=NEW.organization_id AND link.component_id=NEW.id AND (
+      link.ordinal>=expected_commands OR c.accepted_at<NEW.imported_at OR c.principal_kind<>'system' OR c.channel<>'migration' OR c.outcome<>'accepted' OR
+      c.kind<>CASE WHEN link.ordinal=0 THEN 'create'::actions.command_kind ELSE 'reject'::actions.command_kind END OR
+      t.action_id IS NULL OR t.result_version<>link.ordinal+1 OR t.result_revision_id<>revision.id OR t.result_record_kind<>expected_kind OR
+      t.result_approval_id IS NOT NULL OR t.result_attention_version<>link.ordinal+1 OR
+      (link.ordinal=0 AND (t.previous_version IS NOT NULL OR t.result_decision<>'open' OR revision.authored_command_id<>c.id)) OR
+      (link.ordinal=1 AND (t.previous_version IS DISTINCT FROM 1::bigint OR t.previous_decision<>'open' OR t.result_decision<>'declined')) OR
+      EXISTS(SELECT 1 FROM actions.command_target other WHERE other.organization_id=c.organization_id AND other.command_id=c.id AND other.action_id<>parent.action_id)
+    )) THEN RAISE EXCEPTION 'Imported source claims cannot impersonate command authority or bypass exact version history' USING ERRCODE='23514'; END IF;
+  RETURN NULL;
+END $$;
+
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.guard_revision() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Revision deletion requires the separate erasure authority' USING ERRCODE = '23514';
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW.sealed THEN
+    RAISE EXCEPTION 'Build content before sealing its revision' USING ERRCODE = '23514';
+  END IF;
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.sealed OR ROW(NEW.id, NEW.organization_id, NEW.action_id, NEW.purpose, NEW.kind, NEW.revision_number, NEW.authored_command_id, NEW.created_at)
+      IS DISTINCT FROM ROW(OLD.id, OLD.organization_id, OLD.action_id, OLD.purpose, OLD.kind, OLD.revision_number, OLD.authored_command_id, OLD.created_at) THEN
+      RAISE EXCEPTION 'A sealed revision and revision identity are immutable' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.sealed THEN
+      -- Each later owner extends this closed dispatch with its complete leaves.
+      -- A contract enum alone never enables a content or provider branch.
+      IF NEW.kind = 'advisory' AND NEW.purpose IN ('proposal','historical') THEN
+        PERFORM agent_work.check_attention_revision_seal(NEW);
+      ELSIF NEW.kind = 'collection' AND NEW.purpose = 'proposal' THEN
+        IF NOT EXISTS (SELECT 1 FROM actions.membership m WHERE m.organization_id = NEW.organization_id AND m.parent_revision_id = NEW.id)
+          OR EXISTS (SELECT 1 FROM agent_work.attention_advisory c WHERE c.organization_id = NEW.organization_id AND c.revision_id = NEW.id)
+          OR EXISTS (SELECT 1 FROM actions.membership m LEFT JOIN actions.revision c ON c.organization_id = m.organization_id AND c.id = m.child_revision_id
+            WHERE m.organization_id = NEW.organization_id AND m.parent_revision_id = NEW.id
+            AND (c.id IS NULL OR c.kind = 'collection' OR NOT c.sealed OR c.purpose <> 'proposal' OR c.action_id = NEW.action_id)) THEN
+          RAISE EXCEPTION 'Incomplete sealed collection membership' USING ERRCODE = '23514';
+        END IF;
+      ELSIF NEW.kind = 'review_reply' AND NEW.purpose IN ('proposal', 'baseline', 'observation') THEN
+        PERFORM composition.check_review_revision_seal(NEW);
+      ELSIF NEW.kind = 'listing' AND NEW.purpose IN ('proposal', 'baseline', 'observation') THEN
+        PERFORM composition.check_listing_revision_seal(NEW);
+      ELSE
+        RAISE EXCEPTION 'Content owner is not yet installed for this revision shape' USING ERRCODE = '23514';
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+--> statement-breakpoint
+ALTER TABLE history.source_record ALTER CONSTRAINT import_source_component_scope DEFERRABLE INITIALLY DEFERRED;
+
+--> statement-breakpoint
+ALTER TABLE history.component_command ALTER CONSTRAINT component_command_component_scope DEFERRABLE INITIALLY DEFERRED;
+
+--> statement-breakpoint
+CREATE TRIGGER import_run_guard BEFORE INSERT OR UPDATE OR DELETE ON history.import_run FOR EACH ROW EXECUTE FUNCTION history.guard_import_run();
+
+--> statement-breakpoint
+CREATE TRIGGER import_component_insert_guard BEFORE INSERT ON history.import_component FOR EACH ROW EXECUTE FUNCTION history.guard_component_insert();
+
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER import_component_complete AFTER INSERT ON history.import_component DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION history.check_attention_component();
+
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER import_source_slot AFTER INSERT ON history.source_record DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION history.check_source_slot();
+
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER import_command_slot AFTER INSERT ON history.component_command DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION history.check_command_slot();
+
+--> statement-breakpoint
+CREATE TRIGGER import_component_immutable BEFORE UPDATE OR DELETE ON history.import_component FOR EACH ROW EXECUTE FUNCTION history.guard_import_fact();
+
+--> statement-breakpoint
+CREATE TRIGGER component_command_immutable BEFORE UPDATE OR DELETE ON history.component_command FOR EACH ROW EXECUTE FUNCTION history.guard_import_fact();
+
+--> statement-breakpoint
+CREATE TRIGGER source_record_immutable BEFORE UPDATE OR DELETE ON history.source_record FOR EACH ROW EXECUTE FUNCTION history.guard_import_fact();
+
+--> statement-breakpoint
+CREATE TRIGGER overlay_claim_immutable BEFORE UPDATE OR DELETE ON history.overlay_claim FOR EACH ROW EXECUTE FUNCTION history.guard_import_fact();
+
+--> statement-breakpoint
+CREATE TRIGGER attention_source_claim_immutable BEFORE UPDATE OR DELETE ON agent_work.attention_source_claim FOR EACH ROW EXECUTE FUNCTION history.guard_import_fact();
+
+--> statement-breakpoint
+CREATE FUNCTION agent_work.guard_attention_claim_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM history.source_record s
+    JOIN actions.revision r ON r.organization_id=s.organization_id AND r.id=NEW.source_revision_id AND r.action_id=s.action_id
+    WHERE s.organization_id=NEW.organization_id AND s.id=NEW.record_id AND s.source_kind='pending_action'
+      AND r.kind='advisory' AND r.purpose IN ('proposal','historical')) THEN
+    RAISE EXCEPTION 'Attention claim must belong to the exact pending source and advisory revision' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE FUNCTION history.guard_overlay_claim_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM history.source_record personal
+    JOIN history.source_record parent ON parent.organization_id=personal.organization_id
+      AND parent.component_id=personal.component_id AND parent.source_kind='pending_action'
+      AND parent.source_id=NEW.target_source_id AND parent.action_id=personal.action_id
+      AND parent.asset_id IS NOT DISTINCT FROM personal.asset_id AND parent.scope=personal.scope
+    WHERE personal.organization_id=NEW.organization_id AND personal.id=NEW.record_id
+      AND personal.source_kind='inbox_item_state') THEN
+    RAISE EXCEPTION 'Personal claim must belong to its exact component pending source' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER attention_claim_insert_guard BEFORE INSERT ON agent_work.attention_source_claim
+  FOR EACH ROW EXECUTE FUNCTION agent_work.guard_attention_claim_insert();
+--> statement-breakpoint
+CREATE TRIGGER overlay_claim_insert_guard BEFORE INSERT ON history.overlay_claim
+  FOR EACH ROW EXECUTE FUNCTION history.guard_overlay_claim_insert();
+
+-- 0171_review_reopen_fresh_baseline.sql
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_cycle_shape";--> statement-breakpoint
+CREATE INDEX "command_target_approval_clearing" ON "actions"."command_target" USING btree ("organization_id","action_id","result_version" DESC NULLS LAST) WHERE "actions"."command_target"."previous_decision" = 'approved' AND "actions"."command_target"."result_decision" = 'open' AND "actions"."command_target"."previous_approval_id" IS NOT NULL AND "actions"."command_target"."result_approval_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_cycle_shape" CHECK (CASE
+        WHEN "actions"."command"."kind" = 'reconcile' AND "actions"."command"."outcome" = 'accepted' AND "actions"."command"."cycle_purpose" IS NULL THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND "actions"."command"."progress_execution_id" IS NOT NULL AND "actions"."command"."progress_step_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" IN ('open_recovery','reconcile','resume_hold') AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at") = 5
+          AND CASE "actions"."command"."kind"
+            WHEN 'open_recovery' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NULL
+            WHEN 'reconcile' THEN "actions"."command"."principal_kind" IN ('user','api_key') AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            WHEN 'resume_hold' THEN "actions"."command"."principal_kind" = 'system' AND "actions"."command"."cycle_predecessor_command_id" IS NOT NULL
+            ELSE false END
+          AND CASE "actions"."command"."cycle_purpose"
+            WHEN 'binding' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'prewrite' THEN "actions"."command"."progress_subject_attempt_id" IS NULL AND "actions"."command"."cycle_planned_step_id" IS NOT NULL
+            WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
+            ELSE false END
+        WHEN "actions"."command"."kind" = 'reopen' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."progress_cycle_command_id") = 4
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'record_progress' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."progress_execution_id" IS NOT NULL
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        WHEN "actions"."command"."kind" = 'record_attempt' AND "actions"."command"."outcome" = 'accepted' THEN
+          num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND "actions"."command"."principal_kind" = 'system' AND "actions"."command"."channel" = 'worker'
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        ELSE num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
+        END);
+--> statement-breakpoint
+-- Structural ancestry only. The canonical provider owner decodes every immutable
+-- capture before issuing this certificate; terminal state alone proves nothing.
+CREATE FUNCTION actions.has_failed_reopen_certificate(tenant text, execution_id_arg text, command_id_arg text DEFAULT NULL)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+ SELECT EXISTS (
+  SELECT 1 FROM actions.command c
+  JOIN actions.command_target t ON t.organization_id=c.organization_id AND t.command_id=c.id
+  JOIN actions.execution e ON e.organization_id=c.organization_id AND e.id=c.progress_execution_id
+  JOIN actions.approval a ON a.organization_id=e.organization_id AND a.id=e.approval_id
+  JOIN actions.execution_attempt w ON w.organization_id=e.organization_id AND w.execution_id=e.id AND w.step_id=c.progress_step_id AND w.id=c.progress_subject_attempt_id
+  WHERE c.organization_id=tenant AND c.progress_execution_id=execution_id_arg
+   AND (command_id_arg IS NULL OR c.id=command_id_arg)
+   AND c.kind='reopen' AND c.outcome='accepted' AND c.principal_kind IN ('user','api_key')
+   AND c.cycle_purpose IS NULL AND c.progress_cycle_command_id IS NULL AND c.progress_phase IS NULL
+   AND e.phase='settled' AND e.result='failed' AND e.settled_at=c.accepted_at
+   AND e.writes_closed_at IS NOT NULL AND e.writes_closed_at<=c.accepted_at
+   AND e.hold_reason IS NULL AND e.resolution_owner='client'
+   AND e.claim_token IS NULL AND e.next_run_at IS NULL AND e.next_step_id IS NULL AND e.current_progress_command_id IS NULL
+   AND a.scope='perform' AND a.action_id=t.action_id AND a.revision_id=t.previous_revision_id AND a.id=t.previous_approval_id
+   AND w.kind='write' AND w.finished_at IS NOT NULL AND w.finished_at<=c.accepted_at
+   AND t.expected_version=t.previous_version AND t.result_version=t.previous_version+1
+   AND t.expected_revision_id=t.previous_revision_id AND t.result_revision_id=t.previous_revision_id
+   AND t.previous_decision='approved' AND t.result_decision='open'
+   AND t.previous_record_kind='work' AND t.result_record_kind='work'
+   AND t.result_approval_id IS NULL AND t.evidence_revision_id IS NULL
+   AND t.result_attention_version=t.previous_attention_version+1
+   AND ROW(t.previous_priority,t.previous_owner_user_id,t.previous_successor_action_id,t.previous_snoozed_until,t.previous_archived_at,t.previous_scheduled_for)
+    IS NOT DISTINCT FROM ROW(t.result_priority,t.result_owner_user_id,t.result_successor_action_id,t.result_snoozed_until,t.result_archived_at,t.result_scheduled_for)
+   AND NOT EXISTS(SELECT 1 FROM actions.command_target other WHERE other.organization_id=c.organization_id AND other.command_id=c.id AND other.action_id<>t.action_id)
+ );
+$$;
+--> statement-breakpoint
+CREATE FUNCTION actions.check_failed_reopen_commit() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution; subject actions.execution_attempt;
+BEGIN
+ IF NEW.kind<>'reopen' OR NEW.outcome<>'accepted' THEN RETURN NULL; END IF;
+ IF NOT actions.has_failed_reopen_certificate(NEW.organization_id,NEW.progress_execution_id,NEW.id) THEN
+  RAISE EXCEPTION 'Reopen requires its exact failed execution certificate' USING ERRCODE='23514';
+ END IF;
+ SELECT * INTO e FROM actions.execution WHERE organization_id=NEW.organization_id AND id=NEW.progress_execution_id;
+ SELECT * INTO subject FROM actions.execution_attempt WHERE organization_id=NEW.organization_id AND execution_id=e.id AND id=NEW.progress_subject_attempt_id;
+ IF EXISTS(SELECT 1 FROM actions.execution_attempt x WHERE x.organization_id=e.organization_id AND x.execution_id=e.id
+    AND (x.kind IN ('generation','conflicting_completion') OR (x.kind IN ('write','readback','inspection','generation','manual_observation') AND x.finished_at IS NULL)))
+  OR EXISTS(SELECT 1 FROM actions.resource_guard g WHERE g.holder_organization_id=e.organization_id AND g.holder_execution_id=e.id)
+  OR EXISTS(SELECT 1 FROM actions.execution_attempt x WHERE x.organization_id=e.organization_id AND x.execution_id=e.id AND x.kind='write' AND x.number>subject.number)
+  OR EXISTS(SELECT 1 FROM actions.command r WHERE r.organization_id=e.organization_id AND r.progress_execution_id=e.id AND r.kind='retry' AND r.outcome='accepted'
+    AND NOT EXISTS(SELECT 1 FROM actions.execution_attempt w WHERE w.organization_id=r.organization_id AND w.execution_id=e.id AND w.kind='write' AND w.retry_command_id=r.id))
+ THEN RAISE EXCEPTION 'Reopen cannot abandon unfinished, conflicting or newer effect work' USING ERRCODE='23514'; END IF;
+ -- Neutral result/ancestry check only: this deliberately does not decode native
+ -- receipts or make a retryability decision. Permanent rejection may be abandoned.
+ IF EXISTS(SELECT 1 FROM actions.execution_attempt w WHERE w.organization_id=e.organization_id AND w.execution_id=e.id AND w.kind='write'
+  AND NOT (w.result IS NOT DISTINCT FROM 'known_not_applied' OR
+    (w.result IS NOT DISTINCT FROM 'uncertain' AND w.uncertainty_reason IS NOT DISTINCT FROM 'claim_expired' AND EXISTS(
+      SELECT 1 FROM actions.execution_attempt l WHERE l.organization_id=w.organization_id AND l.execution_id=w.execution_id AND l.step_id=w.step_id AND l.subject_attempt_id=w.id
+       AND l.kind='late_evidence' AND l.result='known_not_applied'))))
+ THEN RAISE EXCEPTION 'Reopen cannot certify unresolved issued effects' USING ERRCODE='23514'; END IF;
+ RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER failed_reopen_commit AFTER INSERT ON actions.command DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_failed_reopen_commit();
+--> statement-breakpoint
+CREATE FUNCTION actions.check_issued_approval_clearing() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE e actions.execution;
+BEGIN
+ IF OLD.decision<>'approved' OR OLD.current_approval_id IS NULL OR NEW.current_approval_id IS NOT NULL OR NEW.decision<>'open' THEN RETURN NULL; END IF;
+ SELECT * INTO e FROM actions.execution WHERE organization_id=OLD.organization_id AND approval_id=OLD.current_approval_id;
+ IF FOUND AND EXISTS(SELECT 1 FROM actions.execution_attempt w WHERE w.organization_id=e.organization_id AND w.execution_id=e.id AND w.kind IN ('write','generation')) THEN
+  IF NOT actions.has_failed_reopen_certificate(e.organization_id,e.id) OR NOT EXISTS(
+   SELECT 1 FROM actions.command_target t JOIN actions.command c ON c.organization_id=t.organization_id AND c.id=t.command_id
+   WHERE t.organization_id=NEW.organization_id AND t.action_id=NEW.id AND t.result_version=NEW.version
+    AND c.kind='reopen' AND c.outcome='accepted' AND c.progress_execution_id=e.id)
+  THEN RAISE EXCEPTION 'Issued approval clearing requires its exact failed reopen' USING ERRCODE='23514'; END IF;
+ END IF;
+ RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER issued_approval_clearing AFTER UPDATE ON actions.action DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION actions.check_issued_approval_clearing();
+--> statement-breakpoint
+-- Existing author/target/version edges certify the closed refresh protocol. No
+-- timestamp can replace observing the committed reopen before starting source I/O.
+CREATE FUNCTION review_work.has_fresh_reopen_baseline(tenant text, ticket_id text, proposal_id text)
+RETURNS boolean LANGUAGE sql STABLE AS $$
+ WITH boundary AS MATERIALIZED (
+  SELECT t.result_version FROM actions.command_target t
+  JOIN actions.command c ON c.organization_id=t.organization_id AND c.id=t.command_id
+  WHERE t.organization_id=tenant AND t.action_id=ticket_id AND t.previous_decision='approved' AND t.result_decision='open'
+   AND t.previous_approval_id IS NOT NULL AND t.result_approval_id IS NULL AND c.kind='reopen' AND c.outcome='accepted'
+  ORDER BY t.result_version DESC LIMIT 1
+ )
+ SELECT NOT EXISTS(SELECT 1 FROM boundary) OR EXISTS(
+  SELECT 1 FROM actions.revision p
+  JOIN actions.revision b ON b.organization_id=p.organization_id AND b.action_id=p.action_id AND b.id=p.baseline_revision_id
+  JOIN actions.command c ON c.organization_id=b.organization_id AND c.id=b.authored_command_id
+  JOIN actions.command_target t ON t.organization_id=c.organization_id AND t.command_id=c.id AND t.action_id=p.action_id
+  JOIN actions.revision authored ON authored.organization_id=p.organization_id AND authored.action_id=p.action_id AND authored.id=t.result_revision_id
+  WHERE p.organization_id=tenant AND p.action_id=ticket_id AND p.id=proposal_id AND p.sealed AND p.purpose='proposal' AND p.kind='review_reply'
+   AND b.sealed AND b.purpose='baseline' AND b.kind='review_reply' AND b.revision_number<p.revision_number
+   AND c.kind='record_observation' AND c.outcome='accepted' AND c.principal_kind IN ('user','api_key') AND c.progress_execution_id IS NULL AND c.cycle_purpose IS NULL
+   AND t.evidence_revision_id=b.id AND t.expected_version=t.previous_version AND t.previous_version>=(SELECT result_version FROM boundary)
+   AND t.result_version=t.previous_version+1 AND t.expected_revision_id=t.previous_revision_id
+   AND t.previous_decision='open' AND t.result_decision='open' AND t.previous_approval_id IS NULL AND t.result_approval_id IS NULL
+   AND t.previous_record_kind='work' AND t.result_record_kind='work' AND t.result_attention_version=t.previous_attention_version+1
+   AND ROW(t.previous_priority,t.previous_owner_user_id,t.previous_successor_action_id,t.previous_snoozed_until,t.previous_archived_at,t.previous_scheduled_for)
+    IS NOT DISTINCT FROM ROW(t.result_priority,t.result_owner_user_id,t.result_successor_action_id,t.result_snoozed_until,t.result_archived_at,t.result_scheduled_for)
+   AND authored.sealed AND authored.purpose='proposal' AND authored.kind='review_reply' AND authored.authored_command_id=c.id
+   AND authored.baseline_revision_id=b.id AND authored.revision_number=b.revision_number+1 AND authored.id<>t.previous_revision_id
+   AND NOT EXISTS(SELECT 1 FROM actions.command_target other WHERE other.organization_id=c.organization_id AND other.command_id=c.id AND other.action_id<>t.action_id)
+ );
+$$;
+--> statement-breakpoint
+CREATE FUNCTION review_work.check_reopened_approval() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM actions.revision r WHERE r.organization_id=NEW.organization_id AND r.id=NEW.revision_id AND r.kind='review_reply')
+  AND NOT review_work.has_fresh_reopen_baseline(NEW.organization_id,NEW.action_id,NEW.revision_id)
+ THEN RAISE EXCEPTION 'Reopened review requires a fresh baseline before approval' USING ERRCODE='23514'; END IF;
+ RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER reopened_review_approval AFTER INSERT ON actions.approval DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION review_work.check_reopened_approval();
+--> statement-breakpoint
+CREATE FUNCTION review_work.check_refresh_authorship() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE t actions.command_target; c actions.command;
+BEGIN
+ IF NEW.kind<>'review_reply' OR NEW.purpose<>'baseline' THEN RETURN NULL; END IF;
+ SELECT * INTO c FROM actions.command WHERE organization_id=NEW.organization_id AND id=NEW.authored_command_id;
+ IF c.kind IS DISTINCT FROM 'record_observation' THEN RETURN NULL; END IF;
+ SELECT * INTO t FROM actions.command_target WHERE organization_id=NEW.organization_id AND command_id=c.id AND action_id=NEW.action_id;
+ IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM actions.command_target b JOIN actions.command bc ON bc.organization_id=b.organization_id AND bc.id=b.command_id
+     WHERE b.organization_id=NEW.organization_id AND b.action_id=NEW.action_id AND b.previous_decision='approved' AND b.result_decision='open'
+      AND b.previous_approval_id IS NOT NULL AND b.result_approval_id IS NULL AND bc.kind='reopen' AND bc.outcome='accepted')
+  OR NOT review_work.has_fresh_reopen_baseline(NEW.organization_id,NEW.action_id,t.result_revision_id)
+ THEN RAISE EXCEPTION 'Fresh review baseline requires its exact reopen and paired proposal' USING ERRCODE='23514'; END IF;
+ RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER review_refresh_authorship AFTER INSERT ON actions.revision DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION review_work.check_refresh_authorship();
+--> statement-breakpoint
+-- Restricted server capability. This role receives no table access and no login.
+-- An operator must explicitly grant membership to the eventual runtime identity.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'fload_actions_resource_reader') THEN
+    CREATE ROLE fload_actions_resource_reader NOLOGIN NOBYPASSRLS;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname = 'fload_actions_resource_reader'
+      AND (rolcanlogin OR rolbypassrls OR rolsuper OR rolcreaterole OR rolcreatedb)
+  ) THEN
+    RAISE EXCEPTION 'Resource safety role has unexpected privileges';
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION actions.assess_resource_safety(
+  scoped_organization_id text,
+  scoped_execution_id text
+) RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+SET row_security = off
+AS $$
+DECLARE
+  derived_guard_id uuid;
+BEGIN
+  IF scoped_organization_id IS NULL OR scoped_organization_id = ''
+    OR scoped_execution_id IS NULL OR scoped_execution_id = ''
+    OR pg_catalog.current_setting('transaction_isolation') <> 'read committed'
+    OR scoped_organization_id IS DISTINCT FROM
+      pg_catalog.current_setting('fload.organization_id', true)
+  THEN
+    RETURN 'unavailable';
+  END IF;
+
+  -- The caller supplies its execution, never an arbitrary resource/foreign ID.
+  SELECT e.resource_guard_id INTO derived_guard_id
+  FROM actions.execution AS e
+  WHERE e.organization_id = scoped_organization_id AND e.id = scoped_execution_id;
+  IF derived_guard_id IS NULL THEN
+    RETURN 'unavailable';
+  END IF;
+
+  -- Read committed is required: after a lock wait, this next statement must
+  -- see evidence committed by the preceding holder, not an older snapshot.
+  -- Compatible with completion/admission order: own action, own execution,
+  -- global resource. Never lock a foreign ticket or execution here.
+  PERFORM g.id FROM actions.resource_guard AS g
+  WHERE g.id = derived_guard_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN 'unavailable';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM actions.execution AS e
+    JOIN actions.execution_attempt AS a
+      ON a.organization_id = e.organization_id AND a.execution_id = e.id
+    WHERE e.resource_guard_id = derived_guard_id
+      AND a.kind = 'conflicting_completion'
+  ) THEN
+    RETURN 'blocked';
+  END IF;
+  RETURN 'safe';
+EXCEPTION WHEN insufficient_privilege THEN
+  -- row_security=off raises instead of filtering if the function owner cannot
+  -- see every row. An incomplete view must never be interpreted as safety.
+  RETURN 'unavailable';
+END $$;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION actions.assess_resource_safety(text, text) FROM PUBLIC;
+--> statement-breakpoint
+GRANT USAGE ON SCHEMA actions TO fload_actions_resource_reader;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION actions.assess_resource_safety(text, text) TO fload_actions_resource_reader;
+
+-- 0172_review_canonical_identity.sql
+-- All affected relations are inactive feature-owned tables. No deployed legacy
+-- review/pending rows are rewritten. Fail atomically if prototype index work
+-- cannot fit this bounded migration; do not run a deployment-wide repair.
+DO $$ BEGIN
+  PERFORM set_config('fload.review_identity_previous_lock_timeout',current_setting('lock_timeout'),true);
+  PERFORM set_config('fload.review_identity_previous_statement_timeout',current_setting('statement_timeout'),true);
+  PERFORM set_config('lock_timeout','5s',true);
+  PERFORM set_config('statement_timeout','30s',true);
+END $$;
+--> statement-breakpoint
+-- Private draft only: install before generated identity CHECK/index statements.
+-- PostgreSQL text is already non-NUL UTF-8. The enum owns only store labels;
+-- native app/review grammar and correspondence remain source-owner concerns.
+CREATE FUNCTION review_work.review_identity_key(
+  scope_organization text, scope_store review_work.store,
+  scope_app text, scope_review text
+) RETURNS uuid LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE AS $$
+  WITH inputs AS (
+    SELECT ARRAY['fload:review-identity:1', scope_organization,
+      CASE scope_store WHEN 'ios' THEN 'ios' WHEN 'android' THEN 'android' END,
+      scope_app, scope_review] AS values
+  ), encoded AS (
+    SELECT string_agg(int4send(octet_length(convert_to(value, 'UTF8')))
+      || convert_to(value, 'UTF8'), ''::bytea ORDER BY ordinal) AS bytes
+    FROM inputs, unnest(inputs.values) WITH ORDINALITY AS scalar(value, ordinal)
+  ), hashed AS (SELECT encode(sha256(bytes), 'hex') AS h FROM encoded)
+  SELECT (substr(h,1,8)||'-'||substr(h,9,4)||'-5'||substr(h,14,3)
+    ||'-a'||substr(h,18,3)||'-'||substr(h,21,12))::uuid FROM hashed
+$$;
+--> statement-breakpoint
+CREATE TABLE "review_work"."review_identity" (
+	"organization_id" text NOT NULL,
+	"identity_key" uuid NOT NULL,
+	"codec_version" integer NOT NULL,
+	"store" "review_work"."store" NOT NULL,
+	"provider_app_id" text NOT NULL,
+	"provider_review_id" text NOT NULL,
+	"action_id" text NOT NULL,
+	"witness_revision_id" text NOT NULL,
+	CONSTRAINT "review_identity_organization_id_identity_key_pk" PRIMARY KEY("organization_id","identity_key"),
+	CONSTRAINT "review_identity_action_unique" UNIQUE("organization_id","action_id"),
+	CONSTRAINT "review_identity_codec" CHECK ("review_work"."review_identity"."codec_version" = 1 AND length("review_work"."review_identity"."provider_app_id") > 0
+          AND length("review_work"."review_identity"."provider_review_id") > 0
+          AND "review_work"."review_identity"."identity_key" = review_work.review_identity_key(
+            "review_work"."review_identity"."organization_id", "review_work"."review_identity"."store", "review_work"."review_identity"."provider_app_id", "review_work"."review_identity"."provider_review_id"))
+);
+--> statement-breakpoint
+ALTER TABLE "review_work"."review_identity" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "actions"."command" DROP CONSTRAINT "command_digest_shape";--> statement-breakpoint
+ALTER TABLE "review_work"."review_identity" ADD CONSTRAINT "review_identity_action_scope" FOREIGN KEY ("organization_id","action_id") REFERENCES "actions"."action"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review_work"."review_identity" ADD CONSTRAINT "review_identity_witness_scope" FOREIGN KEY ("organization_id","action_id","witness_revision_id") REFERENCES "actions"."revision"("organization_id","action_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "review_content_identity_lookup" ON "review_work"."reply_content" USING btree ("organization_id",review_work.review_identity_key("organization_id", "store", "provider_app_id", "provider_review_id"));--> statement-breakpoint
+ALTER TABLE "actions"."command" ADD CONSTRAINT "command_digest_shape" CHECK ("actions"."command"."request_digest" ~ '^[0-9a-f]{64}$' AND ("actions"."command"."digest_version" = 1 OR ("actions"."command"."kind" = 'create' AND "actions"."command"."digest_version" = 2)));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "review_work"."review_identity" AS PERMISSIVE FOR ALL TO public USING ("review_work"."review_identity"."organization_id" = current_setting('fload.organization_id', true)) WITH CHECK ("review_work"."review_identity"."organization_id" = current_setting('fload.organization_id', true));
+--> statement-breakpoint
+
+CREATE FUNCTION review_work.check_identity_binding() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE witness actions.revision; content review_work.reply_content;
+BEGIN
+  SELECT * INTO witness FROM actions.revision
+    WHERE organization_id=NEW.organization_id AND id=NEW.witness_revision_id;
+  SELECT * INTO content FROM review_work.reply_content
+    WHERE organization_id=NEW.organization_id AND revision_id=NEW.witness_revision_id;
+  IF witness.id IS NULL OR content.revision_id IS NULL
+    OR witness.action_id IS DISTINCT FROM NEW.action_id
+    OR NOT witness.sealed OR witness.kind <> 'review_reply'
+    OR ROW(content.store,content.provider_app_id COLLATE "C",content.provider_review_id COLLATE "C")
+      IS DISTINCT FROM ROW(NEW.store,NEW.provider_app_id COLLATE "C",NEW.provider_review_id COLLATE "C")
+    OR NOT EXISTS(SELECT 1 FROM actions.action a WHERE a.organization_id=NEW.organization_id
+      AND a.id=NEW.action_id AND a.domain='reviews') THEN
+    RAISE EXCEPTION 'Review identity requires its exact sealed domain witness' USING ERRCODE='23514';
+  END IF;
+  -- Legacy feature rows are considered only in the affected canonical bucket.
+  -- An ambiguous old identity cannot be silently assigned to one of its tickets.
+  IF EXISTS(SELECT 1 FROM review_work.reply_content c
+    JOIN actions.revision r ON r.organization_id=c.organization_id AND r.id=c.revision_id
+    WHERE c.organization_id=NEW.organization_id AND r.sealed
+      AND review_work.review_identity_key(c.organization_id,c.store,c.provider_app_id,c.provider_review_id)=NEW.identity_key
+      AND (r.action_id IS DISTINCT FROM NEW.action_id
+        OR ROW(c.store,c.provider_app_id COLLATE "C",c.provider_review_id COLLATE "C")
+          IS DISTINCT FROM ROW(NEW.store,NEW.provider_app_id COLLATE "C",NEW.provider_review_id COLLATE "C"))) THEN
+    RAISE EXCEPTION 'Retained review identity is ambiguous or colliding' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER review_identity_witness_guard
+  AFTER INSERT ON review_work.review_identity DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION review_work.check_identity_binding();
+--> statement-breakpoint
+CREATE TRIGGER review_identity_immutable BEFORE UPDATE OR DELETE ON review_work.review_identity
+  FOR EACH ROW EXECUTE FUNCTION actions.reject_fact_mutation();
+--> statement-breakpoint
+CREATE FUNCTION review_work.check_new_ticket_identity() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE head actions.revision;
+BEGIN
+  -- A collection is not an additional review identity. Only the review leaf
+  -- has the singleton requirement; existing domain/revision guards stay intact.
+  SELECT * INTO head FROM actions.revision
+    WHERE organization_id=NEW.organization_id AND id=NEW.current_revision_id;
+  IF head.kind='review_reply' AND NOT EXISTS(
+    SELECT 1 FROM review_work.review_identity i
+    WHERE i.organization_id=NEW.organization_id AND i.action_id=NEW.id
+  ) THEN
+    RAISE EXCEPTION 'New review ticket requires its canonical identity binding' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER new_review_identity_guard AFTER INSERT ON actions.action
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.domain='reviews')
+  EXECUTE FUNCTION review_work.check_new_ticket_identity();
+--> statement-breakpoint
+CREATE FUNCTION review_work.check_creation_digest_version() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.outcome='accepted' AND (
+    (SELECT count(*) FROM actions.command_target t
+      WHERE t.organization_id=NEW.organization_id AND t.command_id=NEW.id) <> 1
+    OR NOT EXISTS(SELECT 1 FROM actions.command_target t
+      JOIN actions.action a ON a.organization_id=t.organization_id AND a.id=t.action_id
+      JOIN actions.revision r ON r.organization_id=t.organization_id AND r.id=t.result_revision_id
+      JOIN review_work.review_identity i ON i.organization_id=t.organization_id AND i.action_id=t.action_id
+      WHERE t.organization_id=NEW.organization_id AND t.command_id=NEW.id
+        AND a.domain='reviews' AND r.kind='review_reply' AND r.purpose='proposal'
+        AND r.action_id=a.id AND r.authored_command_id=NEW.id AND r.sealed
+        AND a.creation_key=i.identity_key)) THEN
+    RAISE EXCEPTION 'Creation digest2 requires one canonical review ticket' USING ERRCODE='23514';
+  END IF;
+  RETURN NULL;
+END $$;
+--> statement-breakpoint
+CREATE CONSTRAINT TRIGGER review_creation_digest_guard AFTER INSERT ON actions.command
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.kind='create' AND NEW.digest_version=2)
+  EXECUTE FUNCTION review_work.check_creation_digest_version();
+
+--> statement-breakpoint
+
+DO $$ BEGIN
+  PERFORM set_config('lock_timeout',current_setting('fload.review_identity_previous_lock_timeout'),true);
+  PERFORM set_config('statement_timeout',current_setting('fload.review_identity_previous_statement_timeout'),true);
+END $$;
+
+-- 0173_resource_conflict_delivery_safety.sql
+-- Inactive Actions feature relations only. No legacy source rewrite. Bound
+-- lock/index/constraint work so a populated preview fails atomically if busy.
+DO $$ BEGIN
+  PERFORM set_config('fload.resource_safety_previous_lock_timeout',current_setting('lock_timeout'),true);
+  PERFORM set_config('fload.resource_safety_previous_statement_timeout',current_setting('statement_timeout'),true);
+  PERFORM set_config('lock_timeout','5s',true);
+  PERFORM set_config('statement_timeout','30s',true);
+END $$;
+--> statement-breakpoint
+ALTER TYPE "actions"."local_denial_reason" ADD VALUE 'resource_conflict';--> statement-breakpoint
+ALTER TYPE "actions"."local_denial_reason" ADD VALUE 'resource_safety_unavailable';--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" DROP CONSTRAINT "attempt_local_denial_shape";--> statement-breakpoint
+CREATE INDEX "execution_resource_history" ON "actions"."execution" USING btree ("resource_guard_id","organization_id","id") WHERE "actions"."execution"."resource_guard_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "actions"."execution_attempt" ADD CONSTRAINT "attempt_local_denial_shape" CHECK (
+        ("actions"."execution_attempt"."local_denial_reason" IS NULL) = ("actions"."execution_attempt"."local_denial_owner" IS NULL)
+        AND ("actions"."execution_attempt"."local_denial_reason" IS NULL OR (
+          "actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."local_denial_owner" IN ('client','fload')
+          AND CASE WHEN "actions"."execution_attempt"."local_denial_reason" IN ('permission_revoked','billing_blocked','approval_changed','source_changed') THEN "actions"."execution_attempt"."local_denial_owner" = 'client'
+            WHEN "actions"."execution_attempt"."local_denial_reason"::text IN ('worker_draining','cancelled','lease_elapsed','resource_conflict','resource_safety_unavailable') THEN "actions"."execution_attempt"."local_denial_owner" = 'fload' ELSE true END
+          AND (("actions"."execution_attempt"."kind" IN ('write','late_evidence','conflicting_completion') AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied' AND "actions"."execution_attempt"."non_application_basis" IS NOT DISTINCT FROM 'pre_dispatch_failure')
+            OR ("actions"."execution_attempt"."kind" IN ('inspection','readback','late_evidence','conflicting_completion') AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'unreadable' AND "actions"."execution_attempt"."unreadable_reason" IS NOT DISTINCT FROM 'cancelled'))
+          AND num_nonnulls("actions"."execution_attempt"."terminal_outcome","actions"."execution_attempt"."semantic_fingerprint","actions"."execution_attempt"."observation_revision_id","actions"."execution_attempt"."output_kind") = 0
+        )));
+--> statement-breakpoint
+DO $$ BEGIN
+  PERFORM set_config('lock_timeout',current_setting('fload.resource_safety_previous_lock_timeout'),true);
+  PERFORM set_config('statement_timeout',current_setting('fload.resource_safety_previous_statement_timeout'),true);
+END $$;

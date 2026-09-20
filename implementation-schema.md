@@ -2,7 +2,207 @@
 
 21 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0169: 21 relations, 356 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0173: 28 relations, 430 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+
+## `agent_work.attention_source_claim`
+
+The exact historical source claim supporting a durable attention ticket; its import never invents approval authority.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → history.source_record.organization_id; FK → actions.revision.organization_id |
+| `record_id` | text | No | PK; FK → history.source_record.id |
+| `source_revision_id` | text | No | FK → actions.revision.id |
+| `orchestrator_run_source_id` | text | No | — |
+| `source_agent_run_id` | text | Yes | — |
+| `priority` | attention_import_priority: high, medium, low | No | — |
+| `status_at_import` | attention_import_status: pending_approval, rejected, expired | No | — |
+| `rejected_by_user_id` | text | Yes | FK → public.user.id |
+| `rejected_at` | timestamp with time zone | Yes | — |
+| `rejected_at_provenance_id` | text | Yes | — |
+| `rejected_reason` | text | Yes | — |
+| `deleted_by_user_id` | text | Yes | FK → public.user.id |
+| `deleted_at` | timestamp with time zone | Yes | — |
+| `failure_reason` | text | Yes | — |
+
+```sql
+attention_source_claim_organization_id_record_id_pk: PRIMARY KEY (organization_id, record_id)
+attention_claim_revision_owner: UNIQUE (organization_id, source_revision_id)
+attention_source_claim_rejected_by_user_id_user_id_fk: (rejected_by_user_id) → public.user (id)
+attention_source_claim_deleted_by_user_id_user_id_fk: (deleted_by_user_id) → public.user (id)
+attention_claim_source_scope: (organization_id, record_id) → history.source_record (organization_id, id)
+attention_claim_revision_scope: (organization_id, source_revision_id) → actions.revision (organization_id, id)
+attention_claim_rejection_shape: (("agent_work"."attention_source_claim"."status_at_import"='rejected' AND "agent_work"."attention_source_claim"."rejected_at" IS NOT NULL AND "agent_work"."attention_source_claim"."rejected_at_provenance_id" IS NOT NULL) OR ("agent_work"."attention_source_claim"."status_at_import"<>'rejected' AND "agent_work"."attention_source_claim"."rejected_at" IS NULL AND "agent_work"."attention_source_claim"."rejected_at_provenance_id" IS NULL AND "agent_work"."attention_source_claim"."rejected_by_user_id" IS NULL AND "agent_work"."attention_source_claim"."rejected_reason" IS NULL))
+attention_claim_deletion_shape: "agent_work"."attention_source_claim"."deleted_by_user_id" IS NULL OR "agent_work"."attention_source_claim"."deleted_at" IS NOT NULL
+attention_claim_instant_bounds: ("agent_work"."attention_source_claim"."rejected_at" IS NULL OR "agent_work"."attention_source_claim"."rejected_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("agent_work"."attention_source_claim"."deleted_at" IS NULL OR "agent_work"."attention_source_claim"."deleted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+```
+
+## `history.import_run`
+
+One independently checked, actor-attributed historical import run and its captured source boundary.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → public.organization.id |
+| `id` | text | No | PK |
+| `importer_version` | integer | No | — |
+| `decoder_version` | integer | No | — |
+| `source_pin` | text | No | — |
+| `census_id` | text | No | — |
+| `operator_kind` | operator_kind: user, system | No | — |
+| `operator_user_id` | text | Yes | FK → public.user.id |
+| `operator_subject_snapshot` | text | Yes | — |
+| `operator_name_snapshot` | text | Yes | — |
+| `started_at` | timestamp with time zone | No | — |
+| `finished_at` | timestamp with time zone | Yes | — |
+| `outcome` | import_run_outcome: completed, aborted | Yes | — |
+
+```sql
+import_run_organization_id_id_pk: PRIMARY KEY (organization_id, id)
+import_run_organization_id_organization_id_fk: (organization_id) → public.organization (id)
+import_run_operator_user_id_user_id_fk: (operator_user_id) → public.user (id)
+import_run_instant_bounds: ("history"."import_run"."started_at" IS NULL OR "history"."import_run"."started_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("history"."import_run"."finished_at" IS NULL OR "history"."import_run"."finished_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+import_run_versions_positive: "history"."import_run"."importer_version" > 0 AND "history"."import_run"."decoder_version" > 0
+import_run_source_pin: "history"."import_run"."source_pin" ~ '^[a-f0-9]{40}$'
+import_run_finality: ("history"."import_run"."finished_at" IS NULL) = ("history"."import_run"."outcome" IS NULL) AND ("history"."import_run"."finished_at" IS NULL OR "history"."import_run"."finished_at" >= "history"."import_run"."started_at")
+import_run_system_actor: "history"."import_run"."operator_kind" <> 'system' OR "history"."import_run"."operator_user_id" IS NULL
+```
+
+## `history.import_component`
+
+One explicitly scoped historical component with its conservation proof and disposition.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → history.import_run.organization_id |
+| `id` | text | No | PK |
+| `import_run_id` | text | No | FK → history.import_run.id |
+| `component_key` | text | No | — |
+| `component_fingerprint` | text | No | — |
+| `mapping_digest` | text | No | — |
+| `fingerprint_version` | integer | No | — |
+| `member_count` | integer | No | — |
+| `imported_at` | timestamp with time zone | No | — |
+| `redacted_at` | timestamp with time zone | Yes | — |
+
+```sql
+import_component_organization_id_id_pk: PRIMARY KEY (organization_id, id)
+import_component_identity: UNIQUE (organization_id, component_key)
+import_component_run_scope: (organization_id, import_run_id) → history.import_run (organization_id, id)
+import_component_digests: "history"."import_component"."component_key" ~ '^[a-f0-9]{64}$' AND "history"."import_component"."component_fingerprint" ~ '^[a-f0-9]{64}$' AND "history"."import_component"."mapping_digest" ~ '^[a-f0-9]{64}$'
+import_component_version_count: "history"."import_component"."fingerprint_version"=1 AND "history"."import_component"."member_count">0
+import_component_instant_bounds: ("history"."import_component"."imported_at" IS NULL OR "history"."import_component"."imported_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("history"."import_component"."redacted_at" IS NULL OR "history"."import_component"."redacted_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+import_component_redaction_time: "history"."import_component"."redacted_at" IS NULL OR "history"."import_component"."redacted_at">="history"."import_component"."imported_at"
+```
+
+## `history.source_record`
+
+Typed retained source facts and fingerprints used to prove conservation before cutover.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → history.import_component.organization_id; FK → actions.action.organization_id; FK → public.asset.organizationId |
+| `id` | text | No | PK |
+| `component_id` | text | No | FK → history.import_component.id |
+| `member_ordinal` | integer | No | — |
+| `source_kind` | source_kind: pending_action, inbox_item_state | No | — |
+| `source_id` | text | No | — |
+| `source_fingerprint` | text | No | — |
+| `fingerprint_version` | integer | No | — |
+| `asset_id` | text | Yes | FK → public.asset.id |
+| `scope` | source_scope: asset, organization | No | — |
+| `action_id` | text | No | FK → actions.action.id |
+| `disposition` | source_disposition: imported_as_work, declined_history, terminal_history, personal_state | No | — |
+| `source_created_at` | timestamp with time zone | No | — |
+| `source_updated_at` | timestamp with time zone | No | — |
+| `created_at_provenance_id` | text | No | — |
+| `updated_at_provenance_id` | text | No | — |
+| `personal_user_id` | text | Yes | FK → public.user.id |
+
+```sql
+source_record_organization_id_id_pk: PRIMARY KEY (organization_id, id)
+import_source_component_lookup: INDEX (organization_id ASC, component_id ASC)
+import_source_identity: UNIQUE (organization_id, source_kind, source_id)
+import_source_member_ordinal: UNIQUE (organization_id, component_id, member_ordinal)
+source_record_personal_user_id_user_id_fk: (personal_user_id) → public.user (id)
+import_source_component_scope: (organization_id, component_id) → history.import_component (organization_id, id)
+import_source_action_scope: (organization_id, action_id) → actions.action (organization_id, id)
+import_source_asset_scope: (organization_id, asset_id) → public.asset (organizationId, id)
+import_source_ordinal_nonnegative: "history"."source_record"."member_ordinal">=0
+import_source_asset_shape: ("history"."source_record"."scope"='asset')=("history"."source_record"."asset_id" IS NOT NULL)
+import_source_personal_shape: ("history"."source_record"."source_kind"='inbox_item_state')=("history"."source_record"."personal_user_id" IS NOT NULL) AND ("history"."source_record"."source_kind"='inbox_item_state')=("history"."source_record"."disposition"='personal_state')
+import_source_fingerprint_version: "history"."source_record"."fingerprint_version"=1
+import_source_fingerprint: "history"."source_record"."source_fingerprint" ~ '^[a-f0-9]{64}$'
+import_source_instant_bounds: ("history"."source_record"."source_created_at" IS NULL OR "history"."source_record"."source_created_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz) AND ("history"."source_record"."source_updated_at" IS NULL OR "history"."source_record"."source_updated_at" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+```
+
+## `history.overlay_claim`
+
+The original personal overlay claim, preserved separately from shared workflow authority.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → history.source_record.organization_id |
+| `record_id` | text | No | PK; FK → history.source_record.id |
+| `target_source_id` | text | No | — |
+| `overlay_status` | overlay_status: read, unread, snoozed, dismissed, archived | No | — |
+| `snoozed_until` | timestamp with time zone | Yes | — |
+| `snoozed_until_provenance_id` | text | Yes | — |
+| `note` | text | Yes | — |
+| `resolution` | overlay_resolution: personal_only, pending_review | No | — |
+
+```sql
+overlay_claim_organization_id_record_id_pk: PRIMARY KEY (organization_id, record_id)
+overlay_claim_source_scope: (organization_id, record_id) → history.source_record (organization_id, id)
+overlay_claim_snooze_provenance: ("history"."overlay_claim"."snoozed_until" IS NULL)=("history"."overlay_claim"."snoozed_until_provenance_id" IS NULL)
+overlay_claim_resolution: ("history"."overlay_claim"."overlay_status" IN ('read','unread'))=("history"."overlay_claim"."resolution"='personal_only')
+overlay_claim_instant_bounds: ("history"."overlay_claim"."snoozed_until" IS NULL OR "history"."overlay_claim"."snoozed_until" BETWEEN '0001-01-01T00:00:00Z'::timestamptz AND '9999-12-31T23:59:59.999999Z'::timestamptz)
+```
+
+## `history.component_command`
+
+The immutable command linkage for one imported component; enables exact replay without manufacturing execution.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → history.import_component.organization_id; FK → actions.command.organization_id |
+| `component_id` | text | No | PK; FK → history.import_component.id |
+| `ordinal` | integer | No | PK |
+| `command_id` | text | No | FK → actions.command.id |
+
+```sql
+component_command_organization_id_component_id_ordinal_pk: PRIMARY KEY (organization_id, component_id, ordinal)
+import_command_owner: UNIQUE (organization_id, command_id)
+component_command_component_scope: (organization_id, component_id) → history.import_component (organization_id, id)
+component_command_command_scope: (organization_id, command_id) → actions.command (organization_id, id)
+component_command_ordinal: "history"."component_command"."ordinal">=0
+```
+
+## `review_work.review_identity`
+
+The permanent organization/store/app/original-review identity, independent of connector replacement or asset presentation.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → actions.action.organization_id; FK → actions.revision.organization_id |
+| `identity_key` | uuid | No | PK |
+| `codec_version` | integer | No | — |
+| `store` | store: ios, android | No | — |
+| `provider_app_id` | text | No | — |
+| `provider_review_id` | text | No | — |
+| `action_id` | text | No | FK → actions.action.id; FK → actions.revision.action_id |
+| `witness_revision_id` | text | No | FK → actions.revision.id |
+
+```sql
+review_identity_organization_id_identity_key_pk: PRIMARY KEY (organization_id, identity_key)
+review_identity_action_unique: UNIQUE (organization_id, action_id)
+review_identity_action_scope: (organization_id, action_id) → actions.action (organization_id, id)
+review_identity_witness_scope: (organization_id, action_id, witness_revision_id) → actions.revision (organization_id, action_id, id)
+review_identity_codec: "review_work"."review_identity"."codec_version" = 1 AND length("review_work"."review_identity"."provider_app_id") > 0
+          AND length("review_work"."review_identity"."provider_review_id") > 0
+          AND "review_work"."review_identity"."identity_key" = review_work.review_identity_key(
+            "review_work"."review_identity"."organization_id", "review_work"."review_identity"."store", "review_work"."review_identity"."provider_app_id", "review_work"."review_identity"."provider_review_id")
+```
 
 ## `actions.action`
 
@@ -179,6 +379,10 @@ command_cycle_shape: CASE
             WHEN 'readback' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             WHEN 'cleanup' THEN "actions"."command"."progress_subject_attempt_id" IS NOT NULL AND "actions"."command"."cycle_planned_step_id" IS NULL
             ELSE false END
+        WHEN "actions"."command"."kind" = 'reopen' AND "actions"."command"."outcome" = 'accepted' THEN
+          "actions"."command"."principal_kind" IN ('user','api_key')
+          AND num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id") = 3
+          AND num_nonnulls("actions"."command"."cycle_purpose", "actions"."command"."cycle_planned_step_id", "actions"."command"."cycle_predecessor_command_id", "actions"."command"."cycle_contract_id", "actions"."command"."cycle_anchor_at", "actions"."command"."cycle_decisive_after_at") = 0
         WHEN "actions"."command"."kind" = 'retry' AND "actions"."command"."outcome" = 'accepted' THEN
           "actions"."command"."principal_kind" IN ('user','api_key')
           AND num_nonnulls("actions"."command"."progress_execution_id", "actions"."command"."progress_step_id", "actions"."command"."progress_subject_attempt_id", "actions"."command"."progress_cycle_command_id") = 4
@@ -219,7 +423,7 @@ command_progress_snapshot_shape: (CASE
         ELSE num_nonnulls("actions"."command"."progress_phase", "actions"."command"."progress_result", "actions"."command"."progress_hold_reason", "actions"."command"."progress_resolution_owner", "actions"."command"."progress_exhaustion_reason", "actions"."command"."progress_next_run_at", "actions"."command"."progress_cycle_command_id") = 0
         END) IS TRUE
 command_cycle_not_own_predecessor: "actions"."command"."id" IS DISTINCT FROM "actions"."command"."cycle_predecessor_command_id"
-command_digest_shape: "actions"."command"."request_digest" ~ '^[0-9a-f]{64}$' AND "actions"."command"."digest_version" = 1
+command_digest_shape: "actions"."command"."request_digest" ~ '^[0-9a-f]{64}$' AND ("actions"."command"."digest_version" = 1 OR ("actions"."command"."kind" = 'create' AND "actions"."command"."digest_version" = 2))
 command_outcome_shape: ("actions"."command"."outcome" = 'accepted') = ("actions"."command"."error" IS NULL)
 command_restore_shape: ("actions"."command"."kind" = 'restore') = ("actions"."command"."restore_mode" IS NOT NULL) AND ("actions"."command"."restore_mode" IS NULL OR "actions"."command"."restore_mode" IN ('placement', 'reconsider', 'unhide'))
 command_actor_shape: 
@@ -273,6 +477,7 @@ The exact ticket state before and after one accepted command.
 
 ```sql
 command_target_command_id_action_id_pk: PRIMARY KEY (command_id, action_id)
+command_target_approval_clearing: INDEX (organization_id ASC, action_id ASC, result_version DESC) WHERE "actions"."command_target"."previous_decision" = 'approved' AND "actions"."command_target"."result_decision" = 'open' AND "actions"."command_target"."previous_approval_id" IS NOT NULL AND "actions"."command_target"."result_approval_id" IS NULL
 command_target_scope_identity: UNIQUE (organization_id, command_id, action_id)
 command_target_version_unique: UNIQUE (organization_id, action_id, result_version)
 target_command_scope: (organization_id, command_id) → actions.command (organization_id, id)
@@ -436,6 +641,7 @@ One durable obligation for an exact approval. SQL owns its due time and current 
 | `plan_complete` | boolean | No | Default: False |
 
 ```sql
+execution_resource_history: INDEX (resource_guard_id ASC, organization_id ASC, id ASC) WHERE "actions"."execution"."resource_guard_id" IS NOT NULL
 execution_due: INDEX (next_run_at ASC, "organization_id" COLLATE "C" ASC, "id" COLLATE "C" ASC) WHERE "actions"."execution"."phase" IN ('ready','verification_due','uncertain')
 execution_blocked_due: INDEX (next_run_at ASC, "organization_id" COLLATE "C" ASC, "id" COLLATE "C" ASC) WHERE "actions"."execution"."phase" = 'blocked' AND "actions"."execution"."next_run_at" IS NOT NULL
 execution_claim_expiry: INDEX (claim_expires_at ASC, "organization_id" COLLATE "C" ASC, "id" COLLATE "C" ASC) WHERE "actions"."execution"."phase" = 'claimed'
@@ -512,7 +718,7 @@ One admitted interaction, its fence, and its retained outcome. It is not a queue
 | `finished_at` | timestamp with time zone | Yes | — |
 | `result` | attempt_result: acknowledged, known_not_applied, uncertain, generated, discarded, matched, matched_external, mismatch, unreadable | Yes | — |
 | `failure_class` | failure_class: permission, rate_limit, transport, target_changed, provider_rejected, persistence, unsupported_readback, invalid_content, billing | Yes | — |
-| `local_denial_reason` | local_denial_reason: permission_revoked, billing_blocked, approval_changed, source_changed, source_unavailable, worker_draining, cancelled, lease_elapsed | Yes | — |
+| `local_denial_reason` | local_denial_reason: permission_revoked, billing_blocked, approval_changed, source_changed, source_unavailable, worker_draining, cancelled, lease_elapsed, resource_conflict, resource_safety_unavailable | Yes | — |
 | `local_denial_owner` | execution_resolution_owner: client, fload, provider | Yes | — |
 | `non_application_basis` | non_application_basis: provider_rejection, pre_dispatch_failure, provider_proved_non_application | Yes | — |
 | `retry_disposition` | retry_disposition: retryable, permanent | Yes | — |
@@ -579,7 +785,7 @@ attempt_local_denial_shape:
         AND ("actions"."execution_attempt"."local_denial_reason" IS NULL OR (
           "actions"."execution_attempt"."finished_at" IS NOT NULL AND "actions"."execution_attempt"."local_denial_owner" IN ('client','fload')
           AND CASE WHEN "actions"."execution_attempt"."local_denial_reason" IN ('permission_revoked','billing_blocked','approval_changed','source_changed') THEN "actions"."execution_attempt"."local_denial_owner" = 'client'
-            WHEN "actions"."execution_attempt"."local_denial_reason" IN ('worker_draining','cancelled','lease_elapsed') THEN "actions"."execution_attempt"."local_denial_owner" = 'fload' ELSE true END
+            WHEN "actions"."execution_attempt"."local_denial_reason"::text IN ('worker_draining','cancelled','lease_elapsed','resource_conflict','resource_safety_unavailable') THEN "actions"."execution_attempt"."local_denial_owner" = 'fload' ELSE true END
           AND (("actions"."execution_attempt"."kind" IN ('write','late_evidence','conflicting_completion') AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'known_not_applied' AND "actions"."execution_attempt"."non_application_basis" IS NOT DISTINCT FROM 'pre_dispatch_failure')
             OR ("actions"."execution_attempt"."kind" IN ('inspection','readback','late_evidence','conflicting_completion') AND "actions"."execution_attempt"."result" IS NOT DISTINCT FROM 'unreadable' AND "actions"."execution_attempt"."unreadable_reason" IS NOT DISTINCT FROM 'cancelled'))
           AND num_nonnulls("actions"."execution_attempt"."terminal_outcome","actions"."execution_attempt"."semantic_fingerprint","actions"."execution_attempt"."observation_revision_id","actions"."execution_attempt"."output_kind") = 0
@@ -662,7 +868,7 @@ Typed agent-attention content, independent of personal reads.
 ```sql
 attention_advisory_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
 attention_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
-attention_proposal_only: "agent_work"."attention_advisory"."purpose" = 'proposal'
+attention_supported_purpose: "agent_work"."attention_advisory"."purpose" IN ('proposal','historical')
 attention_failure_count: "agent_work"."attention_advisory"."consecutive_failures" >= 0
 ```
 
@@ -931,6 +1137,7 @@ Exact review and reply values for proposals, baselines, and observations.
 
 ```sql
 reply_content_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
+review_content_identity_lookup: INDEX (organization_id ASC, review_work.review_identity_key("organization_id", "store", "provider_app_id", "provider_review_id") ASC)
 review_content_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
 review_content_original_ai_scope: (organization_id, original_ai_revision_id) → review_work.reply_content (organization_id, revision_id)
 review_content_identity: length("review_work"."reply_content"."provider_app_id") > 0 AND length("review_work"."reply_content"."provider_review_id") > 0 AND "review_work"."reply_content"."original_ai_revision_id" IS DISTINCT FROM "review_work"."reply_content"."revision_id"
