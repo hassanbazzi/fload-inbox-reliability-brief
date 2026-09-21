@@ -1,5 +1,17 @@
 # FLO-1355: implementation reuse and duplication audit
 
+## Current recheck: stop parallel implementation before expanding it
+
+Rechecked current main `b5253b2d7` and local feature `f0ae3f9d8`; published feature remains `641b73b86`. This pass inspected source and callers. It did not run new runtime tests or activate providers.
+
+- **Already corrected:** private Apple session/cache/lock handling, duplicate description-only ASO code, separate request encoders, and the unused browser-write path. The remaining original-review capture is read-only and uses the canonical session manager. Official API delivery uses the existing Apple client and guarded execution kernel.
+- **Still unfinished:** old PendingAction and new Actions lifecycle/read surfaces coexist. Commands and provider-worker factories remain unregistered. A complete change must transfer each existing entrypoint and retire its old writer; another standalone executor would increase the problem.
+- **Stopped before integration:** the uncommitted ASO planner repeats locked revision and installed-operation checks already owned by `execution-repository.prepare`. The proposed standalone binding/authority pipeline is withdrawn. Existing ASO preflight, snapshot convergence, source capture and guarded listing transport must own discovery and execution. Existing observation/attempt fields can retain the exact approval-to-native-target association; no new binding catalog or release watcher is justified.
+- **Uncommitted migration cleanup:** ordinary draft timestamps are duplicated between the proposed draft claim and existing `history.source_record`. Ordinary dates should be read from the existing record; separate embedded rejection-snapshot dates represent different facts. Review import also repeats some attention-import orchestration and needs a focused common-code review. Neither is claimed as consolidated or committed.
+- **No replacement found in the checked infrastructure:** queue definitions and worker entrypoint are unchanged; recovery uses the existing singleton lease. Current review authority calls canonical authentication and existing entitlement/feature/mode services, and approved reply delivery does not add a second credit charge.
+
+All three implementation agents were instructed to hold scope expansion. The listing and historical drafts are retained for review, not accepted as completed work. The next implementation must demonstrate an existing production caller using the durable owner and an explicit old-writer retirement step. This is a bounded audit, not certification that every remaining provider or schema is free of duplication.
+
 Original audit basis (2026-09-21). Main: `b5253b2d799cf35863a9d0c31e3481762e44afde`. Local feature HEAD: `d0945bb3ca61370e3d783d4fcec9573f58d66e01`. Published feature HEAD: `693ff696c589e7b5ff5c71281221f585641f9802`. Draft PR: https://github.com/fload-ai/fload-platform/pull/1470.
 
 ## Cleanup and integration checkpoint — 21 September 2026
