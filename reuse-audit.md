@@ -2,13 +2,28 @@
 
 Assessment date: 2026-09-21. Main: `b5253b2d799cf35863a9d0c31e3481762e44afde`. Local feature HEAD: `d0945bb3ca61370e3d783d4fcec9573f58d66e01`. Published feature HEAD: `693ff696c589e7b5ff5c71281221f585641f9802`. Draft PR: https://github.com/fload-ai/fload-platform/pull/1470.
 
-## Finding
+## Cleanup checkpoint — 21 September 2026
+
+The corrections are published on the feature branch at `f1db52b43`, in the same draft PR #1470:
+
+- Removed the duplicate description-only listing client/source; retained its meaningful cases in the full-field native reader and catalog source tests.
+- Removed the forced private Chromium setup. Review source capture composes the existing SRP session manager, Undici transport and SMS owner. Lifetime and per-operation cancellation are both preserved.
+- Routed the durable API review writer through the existing execution kernel. SQL proves the exact approved content and current attempt/claim; the original kernel issues and consumes the grant. Native uncertainty remains unchanged.
+- Archived and removed the uncommitted account-wide lifetime rewrite and additional browser-execution/schema drafts. The proposed binding-page/version tables are withdrawn.
+- Fixed pagination in the existing Apple listing methods: follow scoped API continuations, fetch incomplete localization relationships, reject contradictory/duplicate data, and never return a partial result as evidence of absence. The existing Iris client refuses incomplete results; it does not claim complete traversal. Separate screenshot-set pagination is outside this checkpoint.
+- Corrected the two previous CI test failures: scoped-page context expectations and a filtered-history query-plan fixture that did not contain enough matching rows to exercise its intended index.
+
+Validation: the combined Actions SQL suite passed **1,087 tests in 105 files** at `9f411aa3f`, with all **175 main and 13 metrics migrations** replayed fresh and a second run unchanged. At final cleanup head `f1db52b43`, the full API typecheck, MCP build/typecheck and 37 affected catalog SQL tests pass. The frozen pagination delta passed 528 Apple tests, 54 API tests, package typecheck, scoped lint/formatting and independent source review. The cancellation refinement passed 45 Apple and 63 affected API tests. Final remote CI is pending; the earlier failing run is not described as green.
+
+**Still required:** production permission/entitlement composition, exclusive handoff from old senders, real entrypoint and UI journeys, conservation migration and retirement of superseded lifecycle storage. The existing release-wait behavior remains the owner to reuse. These corrections do not make the overhaul complete or ready for production. No production deployment or main merge occurred.
+
+## Original audit finding
 
 The implementation expanded into infrastructure Fload already has. This is a scope and integration failure, not just inaccurate wording about browser execution. Useful durability work exists, but it does not justify a parallel authentication system, duplicate provider endpoint implementations, or two independent write authorities. New implementation and schema expansion are stopped while the consolidation is made explicit. Nothing in this assessment constitutes production readiness.
 
 This assessment distinguishes committed inactive code, uncommitted drafts and proposals. It does not claim that recommended removals have already been performed.
 
-## Decisions
+## Original audit decisions (historical; cleanup status above)
 
 | Area | Existing working owner | Finding and correction | Current state |
 | --- | --- | --- | --- |
