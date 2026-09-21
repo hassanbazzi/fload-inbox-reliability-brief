@@ -1,22 +1,19 @@
 # FLO-1355: implementation reuse and duplication audit
 
-## Current recheck: stop parallel implementation before expanding it
+## Current recheck: reuse corrections and existing entrypoints
 
-Rechecked current main `b5253b2d7` and local feature `f0ae3f9d8`; published feature remains `641b73b86`. This pass inspected source and callers. It did not run new runtime tests or activate providers.
+Published feature `2bda0730b`, main `b5253b2d7`. The same draft PR1470 remains open; no application deployment or main merge. Previous head641 passed required CI. New-head CI is running.
 
-- **Already corrected:** private Apple session/cache/lock handling, duplicate description-only ASO code, separate request encoders, and the unused browser-write path. The remaining original-review capture is read-only and uses the canonical session manager. Official API delivery uses the existing Apple client and guarded execution kernel.
-- **Still unfinished:** old PendingAction and new Actions lifecycle/read surfaces coexist. Commands and provider-worker factories remain unregistered. A complete change must transfer each existing entrypoint and retire its old writer; another standalone executor would increase the problem.
-- **Stopped before integration:** the uncommitted ASO planner repeats locked revision and installed-operation checks already owned by `execution-repository.prepare`. The proposed standalone binding/authority pipeline is withdrawn. Existing ASO preflight, snapshot convergence, source capture and guarded listing transport must own discovery and execution. Existing observation/attempt fields can retain the exact approval-to-native-target association; no new binding catalog or release watcher is justified.
-- **Uncommitted migration cleanup:** ordinary draft timestamps are duplicated between the proposed draft claim and existing `history.source_record`. Ordinary dates should be read from the existing record; separate embedded rejection-snapshot dates represent different facts. Review import also repeats some attention-import orchestration and needs a focused common-code review. Neither is claimed as consolidated or committed.
-- **No replacement found in the checked infrastructure:** queue definitions and worker entrypoint are unchanged; recovery uses the existing singleton lease. Current review authority calls canonical authentication and existing entitlement/feature/mode services, and approved reply delivery does not add a second credit charge.
+- Private Apple session/cache/lock handling, duplicate ASO request code and unused browser writes have been removed or consolidated. Existing clients and guarded writes remain the owners.
+- Historical import now shares existing invocation/replay bookkeeping and stores ordinary source timestamps only once. Listing edits share the existing revision writer and ASO field policy.
+- The ASO integration draft reuses existing release discovery and snapshots, immutable observations and attempt fields. No replacement watcher, binding catalog or entitlement service is being introduced.
+- Old PendingAction and new Actions still coexist. Actual ASO and agent-attention entrypoint integration is underway; commands/provider-worker registration and exclusive old-writer retirement remain unfinished.
 
-All three implementation agents were instructed to hold scope expansion. The listing and historical drafts are retained for review, not accepted as completed work. The next implementation must demonstrate an existing production caller using the durable owner and an explicit old-writer retirement step. This is a bounded audit, not certification that every remaining provider or schema is free of duplication.
-
-Original audit basis (2026-09-21). Main: `b5253b2d799cf35863a9d0c31e3481762e44afde`. Local feature HEAD: `d0945bb3ca61370e3d783d4fcec9573f58d66e01`. Published feature HEAD: `693ff696c589e7b5ff5c71281221f585641f9802`. Draft PR: https://github.com/fload-ai/fload-platform/pull/1470.
+This remains an incomplete integration branch. Component test counts do not prove final cutover.
 
 ## Cleanup and integration checkpoint — 21 September 2026
 
-Published feature head: `641b73b86`, in the same draft PR #1470. Reliability cleanup is recorded at `27160b8a0`; remaining provider consolidation and unused browser-write removal at `85a0cf35c`. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
+Published feature head: `2bda0730b`, in the same draft PR #1470. Reliability cleanup is recorded at `27160b8a0`; remaining provider consolidation and unused browser-write removal at `85a0cf35c`. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
 
 - Removed the duplicate description-only listing implementation and forced private Chromium setup. Reuse the existing Apple API client, SRP session manager, Undici transport and SMS owner.
 - Removed the remaining private review cookie store and extra account lease. Capture now shares the existing encrypted cache and login lock, so a waiting login sees the session another worker publishes. Native context checks remain evidence; they do not prove remote session isolation.
@@ -34,7 +31,7 @@ Published feature head: `641b73b86`, in the same draft PR #1470. Reliability cle
 
 **Identity correction:** the existing review registry now distinguishes official Apple API IDs, original WebObjects IDs and Google Play IDs. Migration0175 adds one required enum column and rewrites only derived registry metadata. It adds no table, removes the fallback content scan/index, and preserves permanent ticket IDs, creation keys, immutable content and old command/receipt bytes. Unprovable, mixed or duplicate retained identities abort the migration atomically. Old digest versions remain readable for exact replay; new creations use the qualified identity.
 
-The registry's actual fields are `organization_id text`, `identity_key uuid`, `codec_version integer`, `namespace review_work.identity_namespace`, `store review_work.store`, `provider_app_id text`, `provider_review_id text`, `action_id text`, and `witness_revision_id text`. All are required. The composite primary key is `(organization_id, identity_key)`; `(organization_id, action_id)` is unique. Action and witness links are tenant-scoped foreign keys. Namespace values are exactly `asc_customer_review`, `apple_original_review`, and `google_play_review`. There remain 30 added relations through snapshot0175, with no new JSONB column.
+The registry's actual fields are `organization_id text`, `identity_key uuid`, `codec_version integer`, `namespace review_work.identity_namespace`, `store review_work.store`, `provider_app_id text`, `provider_review_id text`, `action_id text`, and `witness_revision_id text`. All are required. The composite primary key is `(organization_id, identity_key)`; `(organization_id, action_id)` is unique. Action and witness links are tenant-scoped foreign keys. Namespace values are exactly `asc_customer_review`, `apple_original_review`, and `google_play_review`. The identity correction introduced no new relation. The feature now has 32 added relations through snapshot0177, with no new JSONB column; its two new conservation leaves are detailed below.
 
 **Validation:** the previous `fced04cfc` checkpoint passed every required CI block, including migration/reliability, integration, unit, types, lint and deterministic web checks. Its full local suite passed 10,512 API unit tests (four existing skips), with 1,196 Actions SQL cases at the preceding clock checkpoint. The namespace correction passed 198 SQL cases across 15 suites, 45 unit cases, API/database/shared types and scoped lint. All migration runs apply 176 main and 13 metrics migrations fresh and repeat unchanged. Populated upgrades preserve accepted/refused v1/v2 receipts and package membership; invalid native identities roll back atomically.
 
@@ -110,3 +107,46 @@ Root inspection additionally confirmed:
 This was a source/caller/diff audit; it did not run provider writes or deploy anything. Previous isolated tests do not prove the composed system or justify duplicated architecture. The latest remote feature CI at `693ff696c` is **not green**: API integration and Actions reliability blocks failed. The Actions suite reports 1,096 passed and one failed; the failure compares the new scoped HTTP page with an older expected object missing `context`. That assertion and the separate integration failure remain to be resolved; no full-green claim is made.
 
 This audit establishes concrete reuse and removal decisions for the investigated paths. It does not certify every table or all remaining Google Play, Ads, migration, erasure, billing and load-test work. Table count and isolated test count are not completion criteria.
+
+## Review conservation checkpoint0177
+
+The importer retains drafts and rejected draft snapshots using existing tickets, sealed reply content, identity registry, aliases and conservation ledger. Ordinary dates belong to the source record. The new leaves hold typed source metadata and rejection facts; neither creates an approval, provider receipt, model invocation or usage charge.
+
+Validation at2bda:110 SQL cases across five suites,41 units across three suites, API/database/shared types and scoped lint. Main178+metrics13 migration journals apply fresh and repeat unchanged. Exact source restoration, concurrency, rollback/retry, stale source refusal and alias namespace collisions are covered.
+
+Only provably quiescent draft/rejection components are admitted. Queued, claimed, sent, uncertain and externally linked components refuse atomically. Required remaining work: external writer quiescence, full linked-edge refusal census, historical browsing, explicit proposal/resumption, remaining source families and old-writer retirement. These refusals cannot be used to discard outstanding work. Tests use a fixture-supplied external quiescence proof, not a real production handoff.
+
+Fields below are generated from committed snapshot0177. Both tables have immutable rows, RLS tenant policies and composite primary key `(organization_id, record_id)`. The draft claim references the source ledger and exact reply revision; the revision link is unique per tenant. The rejection claim references its draft claim. Snapshot timestamps exist only for the embedded rejection snapshot, not ordinary draft source dates.
+
+### `review_work.draft_source_claim`
+
+| Field | SQL type | Nullable |
+| --- | --- | --- |
+| `organization_id` | `text` | No |
+| `record_id` | `text` | No |
+| `source_revision_id` | `text` | No |
+| `source_draft_id` | `text` | No |
+| `source_shape` | `review_work.draft_source_shape` | No |
+| `identity_namespace` | `review_work.identity_namespace` | No |
+| `model` | `text` | Yes |
+| `prompt_tokens` | `integer` | Yes |
+| `completion_tokens` | `integer` | Yes |
+| `total_tokens` | `integer` | Yes |
+| `pending_send_at` | `timestamp with time zone` | Yes |
+| `sent_at` | `timestamp with time zone` | Yes |
+| `send_attempts` | `integer` | No |
+| `last_send_error` | `text` | Yes |
+| `readback_scheduled_at` | `timestamp with time zone` | Yes |
+| `snapshot_created_at` | `timestamp with time zone` | Yes |
+| `snapshot_updated_at` | `timestamp with time zone` | Yes |
+
+### `review_work.rejection_source_claim`
+
+| Field | SQL type | Nullable |
+| --- | --- | --- |
+| `organization_id` | `text` | No |
+| `record_id` | `text` | No |
+| `rejected_by_user_id` | `text` | Yes |
+| `fingerprint_version` | `integer` | No |
+| `review_fingerprint` | `text` | No |
+| `reason` | `text` | Yes |
