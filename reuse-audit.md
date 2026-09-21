@@ -2,22 +2,24 @@
 
 ## Current recheck: reuse corrections and existing entrypoints
 
-Published feature `2bda0730b`, main `b5253b2d7`. The same draft PR1470 remains open; no application deployment or main merge. All required CI test blocks passed for conservation head2bda0730b. The direct-branch review block ran no independent review job.
+Published feature `c80b4ac46`, main `b5253b2d7`. The same draft PR1470 remains open; no application deployment or main merge. The preceding conservation head2bda0730b passed all required CI test blocks; the direct-branch review block ran no independent review job. Latest consolidation has local proof below; current CI is tracked in the draft PR.
 
-- Private Apple session/cache/lock handling, duplicate ASO request code and unused browser writes have been removed or consolidated. Existing clients and guarded writes remain the owners.
-- Historical import now shares existing invocation/replay bookkeeping and stores ordinary source timestamps only once. Listing edits share the existing revision writer and ASO field policy.
-- The ASO integration draft reuses existing release discovery and snapshots, immutable observations and attempt fields. No replacement watcher, binding catalog or entitlement service is being introduced.
-- Old PendingAction and new Actions still coexist. Actual ASO and agent-attention entrypoint integration is underway; commands/provider-worker registration and exclusive old-writer retirement remain unfinished.
+- Private Apple session/cache/lock handling, duplicate ASO request code and unused browser writes are consolidated or removed. Existing clients and guarded writes remain the owners.
+- Review prewrite, review readback and ASO binding share claim transitions, attempt numbering and bounded recovery-ledger reads in the existing persistence module. Provider-specific evidence remains explicit.
+- Apple successor constraints moved out of the Actions-owned database function into the Apple schema through composition dispatch. Migration0178 adds no tables, fields or indexes.
+- Existing agent-attention entrypoints use the existing materializer/Core/transaction owner in explicit test composition. One revision writer serves both creation and refresh. The production default remains unchanged until migration and old-mutation handoff.
+- Attention aliases now resolve exact organization + namespace + ID; unrelated raw-ID collisions cannot block import, while exact conflicting aliases still refuse.
+- Local proof: 177 SQL cases across nine listing/review suites; 66 attention/import cases across four suites. Full journals apply fresh and repeat unchanged (179 main +13 metrics for listing;178 main +13 metrics for attention).
 
-This remains an incomplete integration branch. Component test counts do not prove final cutover.
+Remaining: complete listing writes/readback and long release-wait recovery; durable agent completion callbacks; source-history browsing; real producer/worker activation; complete migration and old-lifecycle retirement; UI/MCP/load journeys. No replacement watcher, binding catalog, queue or authorization service was introduced. Component counts do not prove final cutover.
 
 ## Cleanup and integration checkpoint — 21 September 2026
 
-Published feature head: `2bda0730b`, in the same draft PR #1470. Reliability cleanup is recorded at `27160b8a0`; remaining provider consolidation and unused browser-write removal at `85a0cf35c`. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
+Published feature head: `c80b4ac46`, in the same draft PR #1470. Reliability cleanup is recorded at `27160b8a0`; remaining provider consolidation and unused browser-write removal at `85a0cf35c`. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
 
 - Removed the duplicate description-only listing implementation and forced private Chromium setup. Reuse the existing Apple API client, SRP session manager, Undici transport and SMS owner.
 - Removed the remaining private review cookie store and extra account lease. Capture now shares the existing encrypted cache and login lock, so a waiting login sees the session another worker publishes. Native context checks remain evidence; they do not prove remote session isolation.
-- Consolidated old and durable review writes into one Apple request encoder. Editing uses the existing create/update POST. Removed delete/recreate and its repair retry; transport failure preserves the previous reply. Legacy fallback still exists until exclusive sender retirement.
+- Consolidated old and durable review writes into one Apple request encoder. Editing uses the existing create/update POST. Removed delete/recreate and its repair retry. No deletion precedes the edit; an uncertain request requires readback to determine what happened. Legacy fallback still exists until exclusive sender retirement.
 - All four materializers now authorize original receipt targets and every originally pinned child before replay or conflict details. Recovery commands reuse the same canonical request authority. Current access never comes from changed input or newer membership.
 - Durable review writes enter the existing execution kernel with the exact SQL approval, content and attempt. No replacement queue or login system was added.
 - Withdrew speculative account-wide locking, browser-execution and extra binding-table drafts. Existing ASO approve/wait/resume behavior keeps its existing owner.
