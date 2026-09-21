@@ -2,7 +2,7 @@
 
 ## Current recheck: reuse corrections and existing entrypoints
 
-Published feature `2bda0730b`, main `b5253b2d7`. The same draft PR1470 remains open; no application deployment or main merge. Previous head641 passed required CI. New-head CI is running.
+Published feature `2bda0730b`, main `b5253b2d7`. The same draft PR1470 remains open; no application deployment or main merge. All required CI test blocks passed for conservation head2bda0730b. The direct-branch review block ran no independent review job.
 
 - Private Apple session/cache/lock handling, duplicate ASO request code and unused browser writes have been removed or consolidated. Existing clients and guarded writes remain the owners.
 - Historical import now shares existing invocation/replay bookkeeping and stores ordinary source timestamps only once. Listing edits share the existing revision writer and ASO field policy.
