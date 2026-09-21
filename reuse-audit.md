@@ -4,9 +4,12 @@ Original audit basis (2026-09-21). Main: `b5253b2d799cf35863a9d0c31e3481762e44af
 
 ## Cleanup and integration checkpoint — 21 September 2026
 
-Published feature head: `1fe6dd25a`, in the same draft PR #1470. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
+Published feature head: `f76b2262c`, in the same draft PR #1470. Reliability cleanup is recorded at `27160b8a0`; remaining provider consolidation and unused browser-write removal at `85a0cf35c`. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
 
 - Removed the duplicate description-only listing implementation and forced private Chromium setup. Reuse the existing Apple API client, SRP session manager, Undici transport and SMS owner.
+- Removed the remaining private review cookie store and extra account lease. Capture now shares the existing encrypted cache and login lock, so a waiting login sees the session another worker publishes. Native context checks remain evidence; they do not prove remote session isolation.
+- Consolidated old and durable review writes into one Apple request encoder. Editing uses the existing create/update POST. Removed delete/recreate and its repair retry; transport failure preserves the previous reply. Legacy fallback still exists until exclusive sender retirement.
+- All four materializers now authorize original receipt targets and every originally pinned child before replay or conflict details. Recovery commands reuse the same canonical request authority. Current access never comes from changed input or newer membership.
 - Durable review writes enter the existing execution kernel with the exact SQL approval, content and attempt. No replacement queue or login system was added.
 - Withdrew speculative account-wide locking, browser-execution and extra binding-table drafts. Existing ASO approve/wait/resume behavior keeps its existing owner.
 - Improved pagination in existing Apple readers. Actions read routes now use the existing authorization boundary; HTTP/database tests cover page/count agreement, tenant access and personal read isolation.
@@ -25,7 +28,11 @@ The registry's actual fields are `organization_id text`, `identity_key uuid`, `c
 
 The composed worker suite now passes eleven cases. Session and API-key approvals cover both new replies and updates to published or pending responses. Updates use the existing API upsert with one POST, no delete/recreate, and unchanged sealed baseline. Root's combined API typecheck and scoped lint passed. Native HTTP remains synthetic; producer setup remains explicitly outside this proof.
 
-[CI for `1fe6dd25a`](https://fload.semaphoreci.com/workflows/b2c5ecd3-c2f4-4494-b565-de0eb57ec8b0?pipeline_id=3da151de-1d3a-489f-b647-b9271a30163f) is running. Previous green results do not certify this head. No independent GitHub PR-review or full-readiness claim.
+**Current cleanup validation:** 10,514 API unit tests pass (four existing skips), alongside 532 Apple package tests, 23 session tests, 77 focused SQL cases and five existing review-drain cases. API/Apple types and scoped lint pass. The full Actions SQL suite passed 1,247 cases across 116 files; all eleven composed worker cases passed using disposable Redis. Both verified 176 main and 13 metrics migrations fresh and repeat unchanged. The subsequent provider cleanup passed all 531 remaining Apple tests, Apple/API types, scoped lint and eighteen source-capture SQL cases. Eight removed tests belonged to the withdrawn unused write API.
+
+[CI for the previous `1fe6dd25a` head](https://fload.semaphoreci.com/workflows/b2c5ecd3-c2f4-4494-b565-de0eb57ec8b0?pipeline_id=3da151de-1d3a-489f-b647-b9271a30163f) finished with two namespace fixture failures and a web tracking teardown failure; all three are corrected in this published checkpoint. Other required blocks passed. New-head CI is pending; earlier results do not certify it. No independent GitHub PR-review or full-readiness claim.
+
+**Further overlap removed:** the ASO one-request adapter now shares its version-localization PATCH encoder with the existing Apple client. The unused native browser-write method and its browser-only binding adapter are removed; authenticated original-review capture exposes reads only. The new recovery loop remains unregistered and must integrate into the existing worker lifecycle; its SQL obligations are distinct from queue delivery.
 
 **Remaining native-identity boundary:** distinct identifier namespaces do not prove whether two different IDs identify the same physical review. The cached `appleReviewResourceId` and text matching cannot transfer an approval. An exclusive app-level old-sender handoff and explicit native target approval remain necessary; no guessed crosswalk table or second sender is introduced.
 
