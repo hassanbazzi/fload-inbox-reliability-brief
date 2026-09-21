@@ -89,6 +89,13 @@ full API/typecheck evidence is not independently rerun evidence. No current-head
 Semaphore pass was established; the old PR's green CI applies to its old head.
 
 Next: fix six findings with negative regressions; complete recovery/operations
-proof and the pending merge; validate the resulting source in CI; then resume
+proof; validate the merged source and subsequent edits in CI; then resume
 remaining provider, source-conservation, entrypoint and UI/MCP cutover work.
 The original inbox overhaul is not complete. No production deployment or merge.
+
+## Concurrent work observed
+
+The local implementation branch merged main at `34a381c29` during publication.
+The reviewed production DBOS files are unchanged; subsequent uncommitted test
+work remains. Tests here certify `28f0cfbff`, not that combined application or
+unfinished edits. The full engineering assessment records the exact locations.
