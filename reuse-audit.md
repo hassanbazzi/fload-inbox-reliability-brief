@@ -2,26 +2,32 @@
 
 Assessment date: 2026-09-21. Main: `b5253b2d799cf35863a9d0c31e3481762e44afde`. Local feature HEAD: `d0945bb3ca61370e3d783d4fcec9573f58d66e01`. Published feature HEAD: `693ff696c589e7b5ff5c71281221f585641f9802`. Draft PR: https://github.com/fload-ai/fload-platform/pull/1470.
 
-## Cleanup checkpoint — 21 September 2026
+## Cleanup and policy checkpoint — 21 September 2026
 
-The corrections are published on the feature branch at `f1db52b43`, in the same draft PR #1470:
+Published feature head: `6b523d74a`, in the same draft PR #1470. New Actions runtime remains inactive.
 
-- Removed the duplicate description-only listing client/source; retained its meaningful cases in the full-field native reader and catalog source tests.
-- Removed the forced private Chromium setup. Review source capture composes the existing SRP session manager, Undici transport and SMS owner. Lifetime and per-operation cancellation are both preserved.
-- Routed the durable API review writer through the existing execution kernel. SQL proves the exact approved content and current attempt/claim; the original kernel issues and consumes the grant. Native uncertainty remains unchanged.
-- Archived and removed the uncommitted account-wide lifetime rewrite and additional browser-execution/schema drafts. The proposed binding-page/version tables are withdrawn.
-- Fixed pagination in the existing Apple listing methods: follow scoped API continuations, fetch incomplete localization relationships, reject contradictory/duplicate data, and never return a partial result as evidence of absence. The existing Iris client refuses incomplete results; it does not claim complete traversal. Separate screenshot-set pagination is outside this checkpoint.
-- Corrected the two previous CI test failures: scoped-page context expectations and a filtered-history query-plan fixture that did not contain enough matching rows to exercise its intended index.
+- Removed duplicate description-only listing client/source; retained meaningful regression cases in the existing full-field reader and catalog tests.
+- Removed forced private Chromium setup. Source capture uses the existing SRP session manager, Undici transport and SMS owner; operation and lifetime cancellation are preserved. Individual-key API delivery remains the primary path.
+- Routed durable review writes through the existing execution kernel. Exact SQL approval/content/attempt facts feed one grant owner.
+- Archived and removed speculative account-wide lifetime locking and browser-execution/schema drafts; proposed listing page/version tables are withdrawn.
+- Fixed pagination in existing Apple listing methods, including incomplete locale relationships, scoped cursors and contradictory/duplicate results. Iris refuses incomplete results. Separate screenshot-set pagination is outside this checkpoint.
+- Bound the existing Actions permission port to its locked transaction. Canonical auth owns current membership, key and impersonation checks; revoked impersonators no longer silently lose actual-actor attribution.
+- Added executor-aware fresh reads to existing subscription, entitlement, feature, Ads connector, billable-app and revenue owners. Tier policy stays in one place; current main-DB facts do not imply an atomic Timescale snapshot.
+- Composed retained human/API review authority from those owners. The existing free mechanical reply does not consume a new credit. OAuth and full-agentic authority are still separate integration work.
 
-Validation: the combined Actions SQL suite passed **1,087 tests in 105 files** at `9f411aa3f`, with all **175 main and 13 metrics migrations** replayed fresh and a second run unchanged. At final cleanup head `f1db52b43`, the full API typecheck, MCP build/typecheck and 37 affected catalog SQL tests pass. The frozen pagination delta passed 528 Apple tests, 54 API tests, package typecheck, scoped lint/formatting and independent source review. The cancellation refinement passed 45 Apple and 63 affected API tests. Final remote CI is pending; the earlier failing run is not described as green.
+Validation: **10,463 API unit tests passed**, four existing skips, combined API typecheck and scoped lint. Targeted real SQL:41 transaction cases,22 current-access cases,24 new plus25 surrounding policy cases,9 composed review cases,32 upgrade-fixture cases,3 screenshot integration cases. Those checkpoints replay175 main and13 metrics migrations fresh and repeat unchanged. The review journey proves one request through the native client/existing kernel, retained acknowledgment, replay without resend, and a real membership revocation after inspection preventing POST. Provider transport is synthetic; no customer write was performed.
 
-**Still required:** production permission/entitlement composition, exclusive handoff from old senders, real entrypoint and UI journeys, conservation migration and retirement of superseded lifecycle storage. The existing release-wait behavior remains the owner to reuse. These corrections do not make the overhaul complete or ready for production. No production deployment or main merge occurred.
+Earlier combined Actions SQL at `9f411aa3f`: **1,087 tests /105 files**. Earlier pagination proof:528 Apple tests,54 API tests, types, lint and independent review. These are checkpoint-specific evidence, not claims that one final run contains every count.
+
+Remote cleanup CI at `f1db52b43` passed migration journals, typecheck, lint, package units, Actions reliability and deterministic web E2E. API units/integration failed on stale native fixtures and test database shutdown lag; all are repaired with local proof. Replacement CI at `6b523d74a` is pending. No full-green or independent PR-review claim yet.
+
+**Still required:** install request/materializer/recovery permissions; preserve session/API-key/OAuth/chat/channel/agent entrypoints; connect existing ASO and review producers/workers; prove exclusive old-writer handoff and typed conservation; retire superseded lifecycle storage; exercise real UI/MCP, pagination/load and recovery. Main-DB locks cannot span provider POSTs, and mixed deletion/Actions lock order can abort a transaction; errors must not become invented permission denials or extra sends. No production deployment or main merge occurred.
 
 ## Original audit finding
 
-The implementation expanded into infrastructure Fload already has. This is a scope and integration failure, not just inaccurate wording about browser execution. Useful durability work exists, but it does not justify a parallel authentication system, duplicate provider endpoint implementations, or two independent write authorities. New implementation and schema expansion are stopped while the consolidation is made explicit. Nothing in this assessment constitutes production readiness.
+The implementation expanded into infrastructure Fload already has. This is a scope and integration failure, not just inaccurate wording about browser execution. Useful durability work exists, but it does not justify a parallel authentication system, duplicate provider endpoint implementations, or two independent write authorities. The original audit required consolidation before further integration; the completed corrections are recorded above. Nothing in this assessment constitutes production readiness.
 
-This assessment distinguishes committed inactive code, uncommitted drafts and proposals. It does not claim that recommended removals have already been performed.
+The following original assessment distinguishes committed inactive code, uncommitted drafts and proposals. Its status statements are historical; the checkpoint above records what has since changed.
 
 ## Original audit decisions (historical; cleanup status above)
 
@@ -46,7 +52,7 @@ This assessment distinguishes committed inactive code, uncommitted drafts and pr
 
 Existing guards are meaningful and must be preserved. However, a process-local single-use grant plus a best-effort post-call log does not retain a lost provider response across a crash. That is the specific durability gap. It is not evidence that provider authentication, ASO or review delivery is missing.
 
-## Required consolidation before activation
+## Original consolidation checklist (checkpoint above records completed items)
 
 1. Preserve the drafts and withdraw the broad lifetime rollout and speculative binding-table proposal from the integration set. Consolidate the inactive description-specific implementation.
 2. Share the existing API/SRP transports and endpoint encoders, with explicit no-hidden-write-retry semantics. Prove the actual session-store contract and selected provider identity; a private cookie jar alone does not establish provider-context isolation.
@@ -54,7 +60,7 @@ Existing guards are meaningful and must be preserved. However, a process-local s
 4. Complete one real review journey and one existing approve/wait/resume ASO journey through production entrypoints, worker routing and UI. Test crash-after-provider-write, uncertain outcomes, duplicate delivery, stale approval, conflicting iteration and old/new ownership exclusion.
 5. Prove migration conservation and deletion/retirement of superseded writers and storage. Existing snapshots remain discovery/history; only selected immutable facts become approval authority.
 
-## Evidence
+## Original audit evidence
 
 Paths are relative to the implementation worktree. The three companion assessments provide detailed caller and line references:
 
@@ -70,7 +76,7 @@ Root inspection additionally confirmed:
 - `apps/api/src/__tests__/unit/provider-write-boundary.test.ts:83` enumerates old write transports; `services/actions/providers/app-store-connect/review-write-dispatcher.ts:327` calls the new native method directly.
 - Existing `queue.ts`, `worker.ts` and `services/work-execution` have no committed main-to-feature differences.
 
-## Validation and limits
+## Original audit validation and limits
 
 This was a source/caller/diff audit; it did not run provider writes or deploy anything. Previous isolated tests do not prove the composed system or justify duplicated architecture. The latest remote feature CI at `693ff696c` is **not green**: API integration and Actions reliability blocks failed. The Actions suite reports 1,096 passed and one failed; the failure compares the new scoped HTTP page with an older expected object missing `context`. That assertion and the separate integration failure remain to be resolved; no full-green claim is made.
 
