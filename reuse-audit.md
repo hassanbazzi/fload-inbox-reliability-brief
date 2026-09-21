@@ -1,27 +1,29 @@
 # FLO-1355: implementation reuse and duplication audit
 
-Assessment date: 2026-09-21. Main: `b5253b2d799cf35863a9d0c31e3481762e44afde`. Local feature HEAD: `d0945bb3ca61370e3d783d4fcec9573f58d66e01`. Published feature HEAD: `693ff696c589e7b5ff5c71281221f585641f9802`. Draft PR: https://github.com/fload-ai/fload-platform/pull/1470.
+Original audit basis (2026-09-21). Main: `b5253b2d799cf35863a9d0c31e3481762e44afde`. Local feature HEAD: `d0945bb3ca61370e3d783d4fcec9573f58d66e01`. Published feature HEAD: `693ff696c589e7b5ff5c71281221f585641f9802`. Draft PR: https://github.com/fload-ai/fload-platform/pull/1470.
 
-## Cleanup and policy checkpoint — 21 September 2026
+## Cleanup and integration checkpoint — 21 September 2026
 
-Published feature head: `6b523d74a`, in the same draft PR #1470. New Actions runtime remains inactive.
+Published feature head: `fced04cfc`, in the same draft PR #1470. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
 
-- Removed duplicate description-only listing client/source; retained meaningful regression cases in the existing full-field reader and catalog tests.
-- Removed forced private Chromium setup. Source capture uses the existing SRP session manager, Undici transport and SMS owner; operation and lifetime cancellation are preserved. Individual-key API delivery remains the primary path.
-- Routed durable review writes through the existing execution kernel. Exact SQL approval/content/attempt facts feed one grant owner.
-- Archived and removed speculative account-wide lifetime locking and browser-execution/schema drafts; proposed listing page/version tables are withdrawn.
-- Fixed pagination in existing Apple listing methods, including incomplete locale relationships, scoped cursors and contradictory/duplicate results. Iris refuses incomplete results. Separate screenshot-set pagination is outside this checkpoint.
-- Bound the existing Actions permission port to its locked transaction. Canonical auth owns current membership, key and impersonation checks; revoked impersonators no longer silently lose actual-actor attribution.
-- Added executor-aware fresh reads to existing subscription, entitlement, feature, Ads connector, billable-app and revenue owners. Tier policy stays in one place; current main-DB facts do not imply an atomic Timescale snapshot.
-- Composed retained human/API review authority from those owners. The existing free mechanical reply does not consume a new credit. OAuth and full-agentic authority are still separate integration work.
+- Removed the duplicate description-only listing implementation and forced private Chromium setup. Reuse the existing Apple API client, SRP session manager, Undici transport and SMS owner.
+- Durable review writes enter the existing execution kernel with the exact SQL approval, content and attempt. No replacement queue or login system was added.
+- Withdrew speculative account-wide locking, browser-execution and extra binding-table drafts. Existing ASO approve/wait/resume behavior keeps its existing owner.
+- Improved pagination in existing Apple readers. Actions read routes now use the existing authorization boundary; HTTP/database tests cover page/count agreement, tenant access and personal read isolation.
+- Current request, retained human/key and agent review permissions reuse canonical auth and existing entitlement/feature owners. Shared review policy lives outside the Apple provider directory. Sending approved reply text keeps its existing zero-credit cost.
+- Canonical OAuth now exposes verified delegation and exact current-consent checks. Persisted OAuth Actions actors and their entrypoints remain unfinished. The prepared command route supports existing `write:agents` API keys and sessions; unrepresentable OAuth actors receive an explicit 403.
+- The existing selected-credential loader now constructs a client from the already selected row. Its mixed-key signer bug is fixed: a valid team key cannot cause selection of an unvalidated individual key.
+- Command acceptance is sampled after asynchronous validation/planning. A database wait that consumes a positive Undo window rolls back the command, allowing same-key retry. Explicit zero-window approval remains immediate. Commit/network latency can still reduce the visible window.
 
-Validation: **10,463 API unit tests passed**, four existing skips, combined API typecheck and scoped lint. Targeted real SQL:41 transaction cases,22 current-access cases,24 new plus25 surrounding policy cases,9 composed review cases,32 upgrade-fixture cases,3 screenshot integration cases. Those checkpoints replay175 main and13 metrics migrations fresh and repeat unchanged. The review journey proves one request through the native client/existing kernel, retained acknowledgment, replay without resend, and a real membership revocation after inspection preventing POST. Provider transport is synthetic; no customer write was performed.
+**Composed journey:** SDK → canonical session/API-key authorization → durable command → SQL worker → existing encrypted credential loader and write kernel → one native POST → acknowledgment/readback. Tests lose the first HTTP receipt and duplicate delivery hints without a second POST. Revoking membership after inspection retains evidence and prevents sending. Marking read leaves shared state, attention and capacity unchanged. Provider HTTP is synthetic; producer materialization is fixture setup, so this does not prove the old-producer handoff.
 
-Earlier combined Actions SQL at `9f411aa3f`: **1,087 tests /105 files**. Earlier pagination proof:528 Apple tests,54 API tests, types, lint and independent review. These are checkpoint-specific evidence, not claims that one final run contains every count.
+**Validation:** 10,512 API unit tests passed (four existing skips); full Actions SQL passed 1,196 tests across 113 files at `5dc65ff60`. The composed checkpoint adds seven worker cases and passes 39 surrounding SQL cases, using disposable Redis and real PostgreSQL. All SQL runs apply 175 main and 13 metrics migrations fresh and repeat them unchanged. Combined API/Core types and scoped lint passed. Independent bounded source reviews found no additional duplicated owner in the integrated auth/client/read/clock changes.
 
-Remote cleanup CI at `f1db52b43` passed migration journals, typecheck, lint, package units, Actions reliability and deterministic web E2E. API units/integration failed on stale native fixtures and test database shutdown lag; all are repaired with local proof. Replacement CI at `6b523d74a` is pending. No full-green or independent PR-review claim yet.
+All required Semaphore blocks passed at `6b523d74a`. CI for the newly published `fced04cfc` is pending; the older green result does not certify this head. No independent GitHub PR-review or full-readiness claim.
 
-**Still required:** install request/materializer/recovery permissions; preserve session/API-key/OAuth/chat/channel/agent entrypoints; connect existing ASO and review producers/workers; prove exclusive old-writer handoff and typed conservation; retire superseded lifecycle storage; exercise real UI/MCP, pagination/load and recovery. Main-DB locks cannot span provider POSTs, and mixed deletion/Actions lock order can abort a transaction; errors must not become invented permission denials or extra sends. No production deployment or main merge occurred.
+**Concrete remaining identity defect:** official Apple API resource IDs and original WebObjects review IDs are different namespaces. Current text matching and cached `appleReviewResourceId` do not prove correspondence. The current registry lacks that distinction: equal strings can wrongly block work, while different strings cannot establish different physical reviews. A correction in the existing registry is in progress; no crosswalk table is proposed. It must preserve ticket IDs, old creation keys, exact receipts and replay bytes. Neither text matching nor an old cache may transfer approval authority.
+
+**Still required:** complete producer/materializer/recovery and OAuth/channel/automatic entrypoints; connect existing ASO and review producers/workers; prove exclusive app-level old-writer handoff; complete typed conservation and retire the old PendingAction lifecycle; exercise complete inbox/Mission Control/MCP and load journeys. The old and new lifecycle models still coexist in this draft. No main merge or production deployment occurred.
 
 ## Original audit finding
 
