@@ -5682,3 +5682,142 @@ DO $$ BEGIN
   PERFORM set_config('lock_timeout',current_setting('fload.resource_safety_previous_lock_timeout'),true);
   PERFORM set_config('statement_timeout',current_setting('fload.resource_safety_previous_statement_timeout'),true);
 END $$;
+
+-- 0174_asc_browser_review_content.sql
+CREATE TYPE "app_store_connect"."browser_review_date_kind" AS ENUM('omitted', 'null', 'string', 'number');--> statement-breakpoint
+CREATE TYPE "app_store_connect"."browser_review_pending_state" AS ENUM('NONE', 'PENDING_CREATE', 'PENDING_UPDATE', 'PENDING_DELETE');--> statement-breakpoint
+CREATE TABLE "app_store_connect"."browser_review_observation" (
+	"organization_id" text NOT NULL,
+	"revision_id" text NOT NULL,
+	"purpose" "actions"."revision_purpose" NOT NULL,
+	"is_editable" boolean NOT NULL,
+	"review_date_kind" "app_store_connect"."browser_review_date_kind" NOT NULL,
+	"review_date_value" text,
+	"response_availability" text NOT NULL,
+	"response_pending_state" "app_store_connect"."browser_review_pending_state",
+	"response_date_kind" "app_store_connect"."browser_review_date_kind",
+	"response_date_value" text,
+	CONSTRAINT "browser_review_observation_organization_id_revision_id_pk" PRIMARY KEY("organization_id","revision_id"),
+	CONSTRAINT "asc_browser_observation_purpose" CHECK ("app_store_connect"."browser_review_observation"."purpose" IN ('baseline','observation')),
+	CONSTRAINT "asc_browser_observation_date_shape" CHECK (("app_store_connect"."browser_review_observation"."review_date_kind" IN ('string','number'))=("app_store_connect"."browser_review_observation"."review_date_value" IS NOT NULL)
+    AND ("app_store_connect"."browser_review_observation"."review_date_kind"<>'number' OR "app_store_connect"."browser_review_observation"."review_date_value" ~ '^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?$')
+    AND ("app_store_connect"."browser_review_observation"."response_date_kind" IS DISTINCT FROM 'number' OR "app_store_connect"."browser_review_observation"."response_date_value" ~ '^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?$')),
+	CONSTRAINT "asc_browser_observation_response_shape" CHECK (("app_store_connect"."browser_review_observation"."response_availability"='absent' AND num_nonnulls("app_store_connect"."browser_review_observation"."response_pending_state","app_store_connect"."browser_review_observation"."response_date_kind","app_store_connect"."browser_review_observation"."response_date_value")=0)
+    OR ("app_store_connect"."browser_review_observation"."response_availability"='present' AND "app_store_connect"."browser_review_observation"."response_pending_state" IS NOT NULL AND "app_store_connect"."browser_review_observation"."response_date_kind" IS NOT NULL
+      AND ("app_store_connect"."browser_review_observation"."response_date_kind" IN ('string','number'))=("app_store_connect"."browser_review_observation"."response_date_value" IS NOT NULL)))
+);
+--> statement-breakpoint
+ALTER TABLE "app_store_connect"."browser_review_observation" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE TABLE "app_store_connect"."browser_review_target" (
+	"organization_id" text NOT NULL,
+	"revision_id" text NOT NULL,
+	"purpose" "actions"."revision_purpose" NOT NULL,
+	"source_asset_data_source_id" text NOT NULL,
+	"source_connector_id" text NOT NULL,
+	"scraping_account_id" text NOT NULL,
+	"invitation_id" text NOT NULL,
+	"selected_provider_id" text NOT NULL,
+	"browser_binding_id" text NOT NULL,
+	"principal_prs_id" text NOT NULL,
+	"principal_email" text NOT NULL,
+	"principal_provider_id" text NOT NULL,
+	"principal_public_provider_id" text NOT NULL,
+	"app_id" text NOT NULL,
+	"platform" text NOT NULL,
+	"original_review_id" text NOT NULL,
+	"response_id" text,
+	CONSTRAINT "browser_review_target_organization_id_revision_id_pk" PRIMARY KEY("organization_id","revision_id"),
+	CONSTRAINT "asc_browser_target_purpose" CHECK ("app_store_connect"."browser_review_target"."purpose" IN ('proposal','baseline','observation')),
+	CONSTRAINT "asc_browser_target_identity" CHECK (length("app_store_connect"."browser_review_target"."source_asset_data_source_id")>0 AND length("app_store_connect"."browser_review_target"."source_connector_id")>0
+    AND length("app_store_connect"."browser_review_target"."scraping_account_id")>0 AND length("app_store_connect"."browser_review_target"."invitation_id")>0 AND length("app_store_connect"."browser_review_target"."browser_binding_id")>0
+    AND length("app_store_connect"."browser_review_target"."principal_prs_id")>0 AND length("app_store_connect"."browser_review_target"."principal_email")>0 AND length("app_store_connect"."browser_review_target"."principal_provider_id")>0
+    AND length("app_store_connect"."browser_review_target"."principal_public_provider_id")>0 AND length("app_store_connect"."browser_review_target"."app_id")>0 AND length("app_store_connect"."browser_review_target"."original_review_id")>0
+    AND ("app_store_connect"."browser_review_target"."response_id" IS NULL OR length("app_store_connect"."browser_review_target"."response_id")>0) AND "app_store_connect"."browser_review_target"."platform"='ios'
+    AND ("app_store_connect"."browser_review_target"."selected_provider_id" COLLATE "C"="app_store_connect"."browser_review_target"."principal_provider_id" COLLATE "C" OR "app_store_connect"."browser_review_target"."selected_provider_id" COLLATE "C"="app_store_connect"."browser_review_target"."principal_public_provider_id" COLLATE "C"))
+);
+--> statement-breakpoint
+ALTER TABLE "app_store_connect"."browser_review_target" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."browser_review_observation" ADD CONSTRAINT "asc_browser_observation_target_scope" FOREIGN KEY ("organization_id","revision_id") REFERENCES "app_store_connect"."browser_review_target"("organization_id","revision_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."browser_review_observation" ADD CONSTRAINT "asc_browser_observation_revision_scope" FOREIGN KEY ("organization_id","revision_id","purpose") REFERENCES "actions"."revision"("organization_id","id","purpose") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "app_store_connect"."browser_review_target" ADD CONSTRAINT "asc_browser_target_revision_scope" FOREIGN KEY ("organization_id","revision_id","purpose") REFERENCES "actions"."revision"("organization_id","id","purpose") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "app_store_connect"."browser_review_observation" AS PERMISSIVE FOR ALL TO public USING ("app_store_connect"."browser_review_observation"."organization_id"=current_setting('fload.organization_id',true)) WITH CHECK ("app_store_connect"."browser_review_observation"."organization_id"=current_setting('fload.organization_id',true));--> statement-breakpoint
+CREATE POLICY "tenant_scope" ON "app_store_connect"."browser_review_target" AS PERMISSIVE FOR ALL TO public USING ("app_store_connect"."browser_review_target"."organization_id"=current_setting('fload.organization_id',true)) WITH CHECK ("app_store_connect"."browser_review_target"."organization_id"=current_setting('fload.organization_id',true));--> statement-breakpoint
+-- Browser is a transport of App Store Connect. These leaves contain original
+-- store IDs and observed browser principals, never official API resource IDs.
+CREATE FUNCTION app_store_connect.check_browser_review_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE content review_work.reply_content; target app_store_connect.browser_review_target;
+  baseline app_store_connect.browser_review_target; observation app_store_connect.browser_review_observation;
+  expected_publication text;
+BEGIN
+  SELECT * INTO content FROM review_work.reply_content c WHERE c.organization_id=revision.organization_id AND c.revision_id=revision.id;
+  IF NOT FOUND OR content.store<>'ios' OR content.review_snapshot_availability<>'present'
+    OR content.review_created_at IS NOT NULL OR content.review_modified_at IS NOT NULL
+    OR content.review_edited IS NULL OR content.review_storefront IS NULL OR content.review_app_version IS NULL THEN
+    RAISE EXCEPTION 'Browser review requires supplied iOS facts without invented normalized dates' USING ERRCODE='23514';
+  END IF;
+  SELECT * INTO target FROM app_store_connect.browser_review_target t WHERE t.organization_id=revision.organization_id AND t.revision_id=revision.id;
+  IF NOT FOUND OR target.purpose<>revision.purpose
+    OR target.app_id COLLATE "C" IS DISTINCT FROM content.provider_app_id COLLATE "C"
+    OR target.original_review_id COLLATE "C" IS DISTINCT FROM content.provider_review_id COLLATE "C" THEN
+    RAISE EXCEPTION 'Browser target must retain the exact original review identity' USING ERRCODE='23514';
+  END IF;
+  IF revision.purpose='proposal' THEN
+    IF (content.intent='update') IS DISTINCT FROM (target.response_id IS NOT NULL) THEN
+      RAISE EXCEPTION 'Browser reply intent requires the exact native response presence' USING ERRCODE='23514';
+    END IF;
+    SELECT * INTO baseline FROM app_store_connect.browser_review_target t WHERE t.organization_id=revision.organization_id AND t.revision_id=revision.baseline_revision_id;
+    -- A proposal pins one capture. A later independent observation may have a
+    -- fresh local binding nonce; that nonce is not permanent principal identity.
+    IF NOT FOUND OR ROW(baseline.source_asset_data_source_id,baseline.source_connector_id,baseline.scraping_account_id,baseline.invitation_id,baseline.selected_provider_id,baseline.browser_binding_id,baseline.principal_prs_id,baseline.principal_email,baseline.principal_provider_id,baseline.principal_public_provider_id,baseline.app_id,baseline.platform,baseline.original_review_id,baseline.response_id)
+      IS DISTINCT FROM ROW(target.source_asset_data_source_id,target.source_connector_id,target.scraping_account_id,target.invitation_id,target.selected_provider_id,target.browser_binding_id,target.principal_prs_id,target.principal_email,target.principal_provider_id,target.principal_public_provider_id,target.app_id,target.platform,target.original_review_id,target.response_id) THEN
+      RAISE EXCEPTION 'Browser proposal target differs from its exact captured source and response baseline' USING ERRCODE='23514';
+    END IF;
+  ELSE
+    SELECT * INTO observation FROM app_store_connect.browser_review_observation o WHERE o.organization_id=revision.organization_id AND o.revision_id=revision.id;
+    IF NOT FOUND OR observation.purpose<>revision.purpose
+      OR observation.response_availability IS DISTINCT FROM content.response_availability::text
+      OR (observation.response_availability='present') IS DISTINCT FROM (target.response_id IS NOT NULL) THEN
+      RAISE EXCEPTION 'Browser captured revision requires exact native response observation' USING ERRCODE='23514';
+    END IF;
+    IF content.response_availability='present' THEN
+      expected_publication:=CASE WHEN content.response_hidden IS TRUE THEN 'hidden'
+        WHEN observation.response_pending_state IN ('PENDING_CREATE','PENDING_UPDATE') THEN 'pending_publication'
+        ELSE 'unreadable' END;
+      IF content.response_hidden IS NULL OR content.response_modified_at IS NOT NULL
+        OR content.publication_state::text IS DISTINCT FROM expected_publication THEN
+        RAISE EXCEPTION 'Browser pending and hidden facts do not prove the claimed response projection' USING ERRCODE='23514';
+      END IF;
+    END IF;
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE OR REPLACE FUNCTION composition.check_review_revision_seal(revision actions.revision) RETURNS void LANGUAGE plpgsql AS $$
+DECLARE review_store review_work.store; has_api boolean; has_browser boolean;
+BEGIN
+  PERFORM review_work.check_revision_seal(revision);
+  IF EXISTS (SELECT 1 FROM agent_work.attention_advisory c WHERE c.organization_id=revision.organization_id AND c.revision_id=revision.id)
+    OR EXISTS (SELECT 1 FROM actions.membership m WHERE m.organization_id=revision.organization_id AND m.parent_revision_id=revision.id) THEN
+    RAISE EXCEPTION 'Review revision cannot contain another domain content family' USING ERRCODE='23514';
+  END IF;
+  SELECT c.store INTO review_store FROM review_work.reply_content c WHERE c.organization_id=revision.organization_id AND c.revision_id=revision.id;
+  SELECT EXISTS(SELECT 1 FROM app_store_connect.review_target t WHERE t.organization_id=revision.organization_id AND t.revision_id=revision.id),
+    EXISTS(SELECT 1 FROM app_store_connect.browser_review_target t WHERE t.organization_id=revision.organization_id AND t.revision_id=revision.id) INTO has_api,has_browser;
+  IF review_store='ios' THEN
+    IF has_api=has_browser OR EXISTS(SELECT 1 FROM google_play.review_target t WHERE t.organization_id=revision.organization_id AND t.revision_id=revision.id) THEN
+      RAISE EXCEPTION 'An iOS review requires exactly one App Store Connect native target variant' USING ERRCODE='23514';
+    END IF;
+    IF has_browser THEN PERFORM app_store_connect.check_browser_review_revision_seal(revision);
+    ELSE PERFORM app_store_connect.check_review_revision_seal(revision); END IF;
+  ELSE
+    IF has_api OR has_browser THEN RAISE EXCEPTION 'A Play review cannot contain an ASC target leaf' USING ERRCODE='23514'; END IF;
+    PERFORM google_play.check_review_revision_seal(revision);
+  END IF;
+END $$;
+--> statement-breakpoint
+CREATE TRIGGER asc_browser_review_content_guard BEFORE INSERT OR UPDATE OR DELETE ON app_store_connect.browser_review_target FOR EACH ROW EXECUTE FUNCTION actions.guard_content();
+--> statement-breakpoint
+CREATE TRIGGER asc_browser_review_owner_guard BEFORE INSERT OR UPDATE OR DELETE ON app_store_connect.browser_review_target FOR EACH ROW EXECUTE FUNCTION review_work.guard_review_owner();
+--> statement-breakpoint
+CREATE TRIGGER asc_browser_observation_content_guard BEFORE INSERT OR UPDATE OR DELETE ON app_store_connect.browser_review_observation FOR EACH ROW EXECUTE FUNCTION actions.guard_content();
+--> statement-breakpoint
+CREATE TRIGGER asc_browser_observation_owner_guard BEFORE INSERT OR UPDATE OR DELETE ON app_store_connect.browser_review_observation FOR EACH ROW EXECUTE FUNCTION review_work.guard_review_owner();

@@ -2,7 +2,73 @@
 
 21 September 2026 · Local implementation snapshot; not production cutover.
 
-Generated from Drizzle snapshot 0173: 28 relations, 430 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+Generated from Drizzle snapshot 0174: 30 relations, 457 fields. Runtime provider dispatch, historical import, erasure and UI cutover are not complete.
+
+## `app_store_connect.browser_review_target`
+
+Exact browser-native app/original-review identity, selected source, account, invitation and observed principal. It is separate from API resource identity; transport never silently falls back.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → actions.revision.organization_id |
+| `revision_id` | text | No | PK; FK → actions.revision.id |
+| `purpose` | revision_purpose: proposal, baseline, observation, historical | No | FK → actions.revision.purpose |
+| `source_asset_data_source_id` | text | No | — |
+| `source_connector_id` | text | No | — |
+| `scraping_account_id` | text | No | — |
+| `invitation_id` | text | No | — |
+| `selected_provider_id` | text | No | — |
+| `browser_binding_id` | text | No | — |
+| `principal_prs_id` | text | No | — |
+| `principal_email` | text | No | — |
+| `principal_provider_id` | text | No | — |
+| `principal_public_provider_id` | text | No | — |
+| `app_id` | text | No | — |
+| `platform` | text | No | — |
+| `original_review_id` | text | No | — |
+| `response_id` | text | Yes | — |
+
+```sql
+browser_review_target_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
+asc_browser_target_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
+asc_browser_target_purpose: "app_store_connect"."browser_review_target"."purpose" IN ('proposal','baseline','observation')
+asc_browser_target_identity: length("app_store_connect"."browser_review_target"."source_asset_data_source_id")>0 AND length("app_store_connect"."browser_review_target"."source_connector_id")>0
+    AND length("app_store_connect"."browser_review_target"."scraping_account_id")>0 AND length("app_store_connect"."browser_review_target"."invitation_id")>0 AND length("app_store_connect"."browser_review_target"."browser_binding_id")>0
+    AND length("app_store_connect"."browser_review_target"."principal_prs_id")>0 AND length("app_store_connect"."browser_review_target"."principal_email")>0 AND length("app_store_connect"."browser_review_target"."principal_provider_id")>0
+    AND length("app_store_connect"."browser_review_target"."principal_public_provider_id")>0 AND length("app_store_connect"."browser_review_target"."app_id")>0 AND length("app_store_connect"."browser_review_target"."original_review_id")>0
+    AND ("app_store_connect"."browser_review_target"."response_id" IS NULL OR length("app_store_connect"."browser_review_target"."response_id")>0) AND "app_store_connect"."browser_review_target"."platform"='ios'
+    AND ("app_store_connect"."browser_review_target"."selected_provider_id" COLLATE "C"="app_store_connect"."browser_review_target"."principal_provider_id" COLLATE "C" OR "app_store_connect"."browser_review_target"."selected_provider_id" COLLATE "C"="app_store_connect"."browser_review_target"."principal_public_provider_id" COLLATE "C")
+```
+
+## `app_store_connect.browser_review_observation`
+
+One immutable browser review observation: editability, hidden/pending state and lossless raw date representations. Unknown native date units remain explicit.
+
+| Field | SQL type / enum | Nullable | Key / default |
+| --- | --- | --- | --- |
+| `organization_id` | text | No | PK; FK → app_store_connect.browser_review_target.organization_id; FK → actions.revision.organization_id |
+| `revision_id` | text | No | PK; FK → app_store_connect.browser_review_target.revision_id; FK → actions.revision.id |
+| `purpose` | revision_purpose: proposal, baseline, observation, historical | No | FK → actions.revision.purpose |
+| `is_editable` | boolean | No | — |
+| `review_date_kind` | browser_review_date_kind: omitted, null, string, number | No | — |
+| `review_date_value` | text | Yes | — |
+| `response_availability` | text | No | — |
+| `response_pending_state` | browser_review_pending_state: NONE, PENDING_CREATE, PENDING_UPDATE, PENDING_DELETE | Yes | — |
+| `response_date_kind` | browser_review_date_kind: omitted, null, string, number | Yes | — |
+| `response_date_value` | text | Yes | — |
+
+```sql
+browser_review_observation_organization_id_revision_id_pk: PRIMARY KEY (organization_id, revision_id)
+asc_browser_observation_target_scope: (organization_id, revision_id) → app_store_connect.browser_review_target (organization_id, revision_id)
+asc_browser_observation_revision_scope: (organization_id, revision_id, purpose) → actions.revision (organization_id, id, purpose)
+asc_browser_observation_purpose: "app_store_connect"."browser_review_observation"."purpose" IN ('baseline','observation')
+asc_browser_observation_date_shape: ("app_store_connect"."browser_review_observation"."review_date_kind" IN ('string','number'))=("app_store_connect"."browser_review_observation"."review_date_value" IS NOT NULL)
+    AND ("app_store_connect"."browser_review_observation"."review_date_kind"<>'number' OR "app_store_connect"."browser_review_observation"."review_date_value" ~ '^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?$')
+    AND ("app_store_connect"."browser_review_observation"."response_date_kind" IS DISTINCT FROM 'number' OR "app_store_connect"."browser_review_observation"."response_date_value" ~ '^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?$')
+asc_browser_observation_response_shape: ("app_store_connect"."browser_review_observation"."response_availability"='absent' AND num_nonnulls("app_store_connect"."browser_review_observation"."response_pending_state","app_store_connect"."browser_review_observation"."response_date_kind","app_store_connect"."browser_review_observation"."response_date_value")=0)
+    OR ("app_store_connect"."browser_review_observation"."response_availability"='present' AND "app_store_connect"."browser_review_observation"."response_pending_state" IS NOT NULL AND "app_store_connect"."browser_review_observation"."response_date_kind" IS NOT NULL
+      AND ("app_store_connect"."browser_review_observation"."response_date_kind" IN ('string','number'))=("app_store_connect"."browser_review_observation"."response_date_value" IS NOT NULL))
+```
 
 ## `agent_work.attention_source_claim`
 
