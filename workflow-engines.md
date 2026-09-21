@@ -1,5 +1,13 @@
 # Durable workflow engines for Fload
 
+> **Current update, 21 September 2026:** DBOS 5.0.2 is implemented at
+> `28f0cfbff`; changes are required before activation. The independent review
+> passed 23 existing tests and reproduced four defects. Read the
+> [visual review](https://hassanbazzi.github.io/fload-inbox-reliability-brief/dbos-review.html)
+> for the actual schema, six findings and remaining work. The earlier
+> checkpoints below are historical and do not describe current readiness.
+
+
 Research checked **21 September 2026** for FLO-1355. Baseline: `d84893a6326286131f392f4a60d19706b46355cd`. This is an architecture assessment from current Fload code, official documentation and upstream source. **No comparative engine benchmark or DBOS implementation has run.**
 
 ## Recommendation

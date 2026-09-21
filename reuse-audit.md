@@ -1,5 +1,13 @@
 # FLO-1355: implementation reuse and duplication audit
 
+> **Current update, 21 September 2026:** DBOS 5.0.2 is implemented at
+> `28f0cfbff`; changes are required before activation. The independent review
+> passed 23 existing tests and reproduced four defects. Read the
+> [visual review](https://hassanbazzi.github.io/fload-inbox-reliability-brief/dbos-review.html)
+> for the actual schema, six findings and remaining work. The earlier
+> checkpoints below are historical and do not describe current readiness.
+
+
 ## Current recheck: existing owners, durable recovery
 
 Published feature `d84893a63`, based on main `b5253b2d7`, in the same draft [PR1470](https://github.com/fload-ai/fload-platform/pull/1470). [All required CI blocks passed at this exact head](https://fload.semaphoreci.com/workflows/4e142074-8565-4ffd-b615-5d0ba96f8def?pipeline_id=b0b1bda6-5b97-4c40-9fc6-d0b21703571d). The preceding `7ede8666e` run exposed stale test fixtures and insufficient compiler heap; the new head fixes those and verifies the complete pipeline. The direct-branch review block ran no independent review job. No application deployment or main merge.

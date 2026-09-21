@@ -1,5 +1,13 @@
 # Fload inbox reliability — architecture review packet
 
+> **Current update, 21 September 2026:** DBOS 5.0.2 is implemented at
+> `28f0cfbff`; changes are required before activation. The independent review
+> passed 23 existing tests and reproduced four defects. Read the
+> [visual review](https://hassanbazzi.github.io/fload-inbox-reliability-brief/dbos-review.html)
+> for the actual schema, six findings and remaining work. The earlier
+> checkpoints below are historical and do not describe current readiness.
+
+
 **Current checkpoint · 20 September 2026:** parallel E4 work reconciled as revision 4.2. Keep the conservative reference mapping; close parent-note sealing and unequal-outcome conservation. Diagnostic summaries stay derived. [Visual update](ownership-overview.html#e4-heading) · [Drift assessment](Fload-Inbox-R3-E4-Reconciliation.md) · [Exact E4 mapping](Fload-Inbox-R3-E4-Variant-Child-Codec.md) · [What remains before implementation](Fload-Inbox-Implementation-Readiness.md).
 
 Implementation remains paused. The schema-and-command build contract is the next deliverable; runtime and migration proofs are not claimed complete.
