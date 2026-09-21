@@ -2,24 +2,26 @@
 
 ## Current recheck: existing owners, durable recovery
 
-Published feature `7ede8666e`, based on main `b5253b2d7`, in the same draft [PR1470](https://github.com/fload-ai/fload-platform/pull/1470). No application deployment or main merge. All required test blocks passed at preceding head `c80b4ac46`; the new head requires its own CI. The direct-branch review block ran no independent review job.
+Published feature `d84893a63`, based on main `b5253b2d7`, in the same draft [PR1470](https://github.com/fload-ai/fload-platform/pull/1470). [All required CI blocks passed at this exact head](https://fload.semaphoreci.com/workflows/4e142074-8565-4ffd-b615-5d0ba96f8def?pipeline_id=b0b1bda6-5b97-4c40-9fc6-d0b21703571d). The preceding `7ede8666e` run exposed stale test fixtures and insufficient compiler heap; the new head fixes those and verifies the complete pipeline. The direct-branch review block ran no independent review job. No application deployment or main merge.
+
+**New research:** [durable workflow engine comparison](workflow-engines.html), covering DBOS, Restate, Temporal, Hatchet, Inngest, Trigger.dev and our current runtime. The separate `codex/flo-1355-dbos` branch starts at `d84893a63`; no engine is installed or selected yet. This evaluates replacing custom orchestration while preserving existing domain and provider owners.
 
 - Removed or consolidated duplicate provider request code, private session/cache/lock handling and the unused browser-write prototype. Existing Apple API/SRP clients and guarded writers remain the owners.
 - The existing ASO snapshot pass now resumes exhausted release waits when a genuinely new release appears, preserving the same ticket, revision and approval. Same-release captures cannot repeatedly replenish capacity. Native PATCH connection remains in progress.
 - The existing agent-run terminal transaction retains attention callbacks, and the existing reconciler recovers them. No new queue or callback table. A false result cannot emit recovery; later consumed events prevent stale callbacks from reopening old work.
 - The existing paginated ticket-history endpoint now exposes conserved source facts with exact counts, access checks and bounded payload hydration. These remain reported facts, not fabricated approvals or provider receipts.
 - Personal read labels and superseded attention notices are conserved without inventing workflow decisions. Personal snooze/dismiss/archive claims still need explicit shared-workflow disposition.
-- Shared Actions SQL now delegates revision/content validation through composition to domain owners. Migration0181 changes functions only; all existing predicates remain enforced.
+- Shared Actions SQL now delegates revision/content validation through composition to domain owners. Migration 0181 changes functions only; all existing predicates remain enforced.
 
 **Newly confirmed coverage gap:** API-key provisioning is not guaranteed for every existing headless account. The durable review planner currently accepts API targets only. Retiring the established headless sender now would remove supported functionality. Complete truthful integration through the existing owner first; do not guess an API/WebObjects ID mapping or inherit an approval across namespaces.
 
-**Local evidence:** release waits 23 SQL +36 unit cases; source history246 SQL +33 contract/SDK unit cases; agent callbacks81 SQL +8 unit cases. The composed final checkpoint passed100 SQL cases across six suites, applying182 main and13 metrics migrations fresh and repeated. Provider HTTP is synthetic; this is component evidence, not a live-provider or final-handoff certification.
+**Local evidence:** release waits 23 SQL +36 unit cases; source history 246 SQL +33 contract/SDK unit cases; agent callbacks 81 SQL +8 unit cases. The composed final checkpoint passed 100 SQL cases across six suites, applying 182 main and 13 metrics migrations fresh and repeated. Provider HTTP is synthetic; this is component evidence, not a live-provider or final-handoff certification.
 
 **Remaining:** full native writes/readback and other domains, retained OAuth attribution and all producer doors, conservation of unsettled/linked work, exclusive old-writer/lifecycle retirement, complete UI/MCP/load journeys. Old PendingAction and new Actions still coexist. Commands and provider workers remain unregistered.
 
 ### Actual schema change: four fields on the existing agent run
 
-The feature still adds32 relations through snapshot0181, with no new JSONB. Migration0180 adds four nullable, no-default fields to **existing `public.agent_run`**; no new relation:
+The feature still adds 32 relations through snapshot 0181, with no new JSONB. Migration 0180 adds four nullable, no-default fields to **existing `public.agent_run`**; no new relation:
 
 | Field | Actual SQL type | Meaning |
 | --- | --- | --- |
@@ -28,7 +30,7 @@ The feature still adds32 relations through snapshot0181, with no new JSONB. Migr
 | `attentionFailureCount` | nullable `integer` | Exact failure threshold; NULL for recovery |
 | `attentionProcessedAt` | nullable `timestamp` | Consumption committed with the existing attention writer |
 
-A structural check allows only `failure` or `recovery` with matching terminal facts; historical rows keep all four fields NULL. The partial index `agent_run_attention_pending_idx` orders `(completedAt, id COLLATE "C")` for an event whose `attentionProcessedAt IS NULL`. Populated heaps are prepared and validated through the existing agent-history preparer; migration0180 adopts exact objects. Migration0181 moves existing validators only.
+A structural check allows only `failure` or `recovery` with matching terminal facts; historical rows keep all four fields NULL. The partial index `agent_run_attention_pending_idx` orders `(completedAt, id COLLATE "C")` for an event whose `attentionProcessedAt IS NULL`. Populated heaps are prepared and validated through the existing agent-history preparer; migration 0180 adopts exact objects. Migration 0181 moves existing validators only.
 
 Flow: existing terminal run transaction → retained event on that run → existing reconciliation job → existing attention writer + consumption in one transaction. This closes crashes after terminal commit; it does not establish exactly-once provider effects before that commit or concurrent execution of an unfinished run.
 
