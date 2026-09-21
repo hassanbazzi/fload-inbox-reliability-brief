@@ -1,19 +1,38 @@
 # FLO-1355: implementation reuse and duplication audit
 
-## Current recheck: reuse corrections and existing entrypoints
+## Current recheck: existing owners, durable recovery
 
-Published feature `c80b4ac46`, main `b5253b2d7`. The same draft PR1470 remains open; no application deployment or main merge. The preceding conservation head2bda0730b passed all required CI test blocks; the direct-branch review block ran no independent review job. Latest consolidation has local proof below; current CI is tracked in the draft PR.
+Published feature `7ede8666e`, based on main `b5253b2d7`, in the same draft [PR1470](https://github.com/fload-ai/fload-platform/pull/1470). No application deployment or main merge. All required test blocks passed at preceding head `c80b4ac46`; the new head requires its own CI. The direct-branch review block ran no independent review job.
 
-- Private Apple session/cache/lock handling, duplicate ASO request code and unused browser writes are consolidated or removed. Existing clients and guarded writes remain the owners.
-- Review prewrite, review readback and ASO binding share claim transitions, attempt numbering and bounded recovery-ledger reads in the existing persistence module. Provider-specific evidence remains explicit.
-- Apple successor constraints moved out of the Actions-owned database function into the Apple schema through composition dispatch. Migration0178 adds no tables, fields or indexes.
-- Existing agent-attention entrypoints use the existing materializer/Core/transaction owner in explicit test composition. One revision writer serves both creation and refresh. The production default remains unchanged until migration and old-mutation handoff.
-- Attention aliases now resolve exact organization + namespace + ID; unrelated raw-ID collisions cannot block import, while exact conflicting aliases still refuse.
-- Local proof: 177 SQL cases across nine listing/review suites; 66 attention/import cases across four suites. Full journals apply fresh and repeat unchanged (179 main +13 metrics for listing;178 main +13 metrics for attention).
+- Removed or consolidated duplicate provider request code, private session/cache/lock handling and the unused browser-write prototype. Existing Apple API/SRP clients and guarded writers remain the owners.
+- The existing ASO snapshot pass now resumes exhausted release waits when a genuinely new release appears, preserving the same ticket, revision and approval. Same-release captures cannot repeatedly replenish capacity. Native PATCH connection remains in progress.
+- The existing agent-run terminal transaction retains attention callbacks, and the existing reconciler recovers them. No new queue or callback table. A false result cannot emit recovery; later consumed events prevent stale callbacks from reopening old work.
+- The existing paginated ticket-history endpoint now exposes conserved source facts with exact counts, access checks and bounded payload hydration. These remain reported facts, not fabricated approvals or provider receipts.
+- Personal read labels and superseded attention notices are conserved without inventing workflow decisions. Personal snooze/dismiss/archive claims still need explicit shared-workflow disposition.
+- Shared Actions SQL now delegates revision/content validation through composition to domain owners. Migration0181 changes functions only; all existing predicates remain enforced.
 
-Remaining: complete listing writes/readback and long release-wait recovery; durable agent completion callbacks; source-history browsing; real producer/worker activation; complete migration and old-lifecycle retirement; UI/MCP/load journeys. No replacement watcher, binding catalog, queue or authorization service was introduced. Component counts do not prove final cutover.
+**Newly confirmed coverage gap:** API-key provisioning is not guaranteed for every existing headless account. The durable review planner currently accepts API targets only. Retiring the established headless sender now would remove supported functionality. Complete truthful integration through the existing owner first; do not guess an API/WebObjects ID mapping or inherit an approval across namespaces.
 
-## Cleanup and integration checkpoint — 21 September 2026
+**Local evidence:** release waits 23 SQL +36 unit cases; source history246 SQL +33 contract/SDK unit cases; agent callbacks81 SQL +8 unit cases. The composed final checkpoint passed100 SQL cases across six suites, applying182 main and13 metrics migrations fresh and repeated. Provider HTTP is synthetic; this is component evidence, not a live-provider or final-handoff certification.
+
+**Remaining:** full native writes/readback and other domains, retained OAuth attribution and all producer doors, conservation of unsettled/linked work, exclusive old-writer/lifecycle retirement, complete UI/MCP/load journeys. Old PendingAction and new Actions still coexist. Commands and provider workers remain unregistered.
+
+### Actual schema change: four fields on the existing agent run
+
+The feature still adds32 relations through snapshot0181, with no new JSONB. Migration0180 adds four nullable, no-default fields to **existing `public.agent_run`**; no new relation:
+
+| Field | Actual SQL type | Meaning |
+| --- | --- | --- |
+| `attentionEventKind` | nullable `text` | Closed failure/recovery event tied to the terminal run |
+| `attentionAssetId` | nullable `text` | Exact source asset; NULL with an event means organization scope |
+| `attentionFailureCount` | nullable `integer` | Exact failure threshold; NULL for recovery |
+| `attentionProcessedAt` | nullable `timestamp` | Consumption committed with the existing attention writer |
+
+A structural check allows only `failure` or `recovery` with matching terminal facts; historical rows keep all four fields NULL. The partial index `agent_run_attention_pending_idx` orders `(completedAt, id COLLATE "C")` for an event whose `attentionProcessedAt IS NULL`. Populated heaps are prepared and validated through the existing agent-history preparer; migration0180 adopts exact objects. Migration0181 moves existing validators only.
+
+Flow: existing terminal run transaction → retained event on that run → existing reconciliation job → existing attention writer + consumption in one transaction. This closes crashes after terminal commit; it does not establish exactly-once provider effects before that commit or concurrent execution of an unfinished run.
+
+## Earlier cleanup and integration checkpoint — 21 September 2026
 
 Published feature head: `c80b4ac46`, in the same draft PR #1470. Reliability cleanup is recorded at `27160b8a0`; remaining provider consolidation and unused browser-write removal at `85a0cf35c`. The branch registers Actions reads and personal read-state operations. Command and provider-worker activation remain unfinished; nothing is deployed.
 
